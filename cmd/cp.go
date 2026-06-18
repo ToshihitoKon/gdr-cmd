@@ -70,7 +70,7 @@ func runCp(cmd *cobra.Command, args []string) error {
 	case srcKind == loc.Drive && dest.IsLocal():
 		return downloadSources(ctx, sources, dest, rawDest)
 	case srcKind == loc.Local && dest.IsDrive():
-		return uploadSources(ctx, sources, dest)
+		return uploadSources(ctx, sources, dest, rawDest)
 	case srcKind == loc.Drive && dest.IsDrive():
 		return fmt.Errorf("Drive 内のコピーは未対応です。移動なら `gdr mv` を使ってください")
 	default: // ローカル → ローカル
@@ -195,7 +195,7 @@ func downloadFile(ctx context.Context, client *drive.Client, f drive.File, outPa
 
 // ---- アップロード (ローカル → Drive) ----
 
-func uploadSources(ctx context.Context, sources []loc.Location, dest loc.Location) error {
+func uploadSources(ctx context.Context, sources []loc.Location, dest loc.Location, rawDest string) error {
 	client, err := drive.New(ctx)
 	if err != nil {
 		return err
@@ -214,8 +214,23 @@ func uploadSources(ctx context.Context, sources []loc.Location, dest loc.Locatio
 		localPaths = append(localPaths, matches...)
 	}
 
-	// コピー先の Drive フォルダを確保する (mkdir -p 相当)。末尾スラッシュ、複数元、
-	// またはディレクトリのアップロードでは dest 自体をフォルダとして扱う。
+	// 宛先をファイル名指定として扱うか、フォルダとして扱うかを決める。
+	// 単一ファイルを、末尾スラッシュ無し・既存フォルダでない drive: パスへ送る場合だけ
+	// 「リネーム付きアップロード」とみなし、それ以外は dest をフォルダとして扱う。
+	if isSingleFileRename(ctx, client, localPaths, rawDest, dest.Path) {
+		parentPath, name := drive.SplitParent(dest.Path)
+		parentID, err := client.EnsureFolderPath(ctx, parentPath)
+		if err != nil {
+			return err
+		}
+		info, err := os.Stat(localPaths[0])
+		if err != nil {
+			return fmt.Errorf("%s: %w", localPaths[0], err)
+		}
+		return uploadFileAs(ctx, client, localPaths[0], info, parentID, name, parentPath)
+	}
+
+	// コピー先の Drive フォルダを確保する (mkdir -p 相当)。
 	destFolderID, err := client.EnsureFolderPath(ctx, dest.Path)
 	if err != nil {
 		return err
@@ -231,6 +246,24 @@ func uploadSources(ctx context.Context, sources []loc.Location, dest loc.Locatio
 		}
 	}
 	return firstErr
+}
+
+// isSingleFileRename は宛先をファイル名指定 (リネーム付きアップロード) として
+// 扱うべきかを返す。単一のローカルファイルを、末尾スラッシュ無し・かつ Drive 上に
+// 既存フォルダでないパスへ送る場合だけ true。複数元・ディレクトリ・末尾スラッシュ・
+// 既存フォルダ宛はすべてフォルダ扱い (false)。
+func isSingleFileRename(ctx context.Context, client *drive.Client, localPaths []string, rawDest, destPath string) bool {
+	if len(localPaths) != 1 || loc.HasTrailingSlash(rawDest) {
+		return false
+	}
+	if info, err := os.Stat(localPaths[0]); err != nil || info.IsDir() {
+		return false
+	}
+	// 宛先が既に Drive 上のフォルダなら、その中へ入れる (ファイル名指定ではない)。
+	if _, isFolder := resolveExistingFolder(ctx, client, destPath); isFolder {
+		return false
+	}
+	return true
 }
 
 // uploadPath はローカルのファイル/ディレクトリを Drive の parentID 直下へ上げる。
@@ -266,20 +299,26 @@ func uploadPath(ctx context.Context, client *drive.Client, localPath, parentID, 
 	return uploadFile(ctx, client, localPath, info, parentID, destDrivePath)
 }
 
-// uploadFile は 1 つのローカルファイルを Drive へアップロードする。
-// destDrivePath はアップロード先フォルダの Drive 絶対パス。
+// uploadFile は 1 つのローカルファイルを、ローカルのファイル名のまま Drive の
+// parentID 直下へアップロードする。
 func uploadFile(ctx context.Context, client *drive.Client, localPath string, info os.FileInfo, parentID, destDrivePath string) error {
+	return uploadFileAs(ctx, client, localPath, info, parentID, filepath.Base(localPath), destDrivePath)
+}
+
+// uploadFileAs は 1 つのローカルファイルを Drive へ driveName という名前で
+// アップロードする (リネーム付きアップロードに使う)。
+// destDrivePath はアップロード先フォルダの Drive 絶対パスで、ログ表示に使う。
+func uploadFileAs(ctx context.Context, client *drive.Client, localPath string, info os.FileInfo, parentID, driveName, destDrivePath string) error {
 	f, err := os.Open(localPath)
 	if err != nil {
 		return fmt.Errorf("%s: %w", localPath, err)
 	}
 	defer f.Close()
 
-	name := filepath.Base(localPath)
-	if _, err := client.Upload(ctx, parentID, name, f, info.ModTime()); err != nil {
+	if _, err := client.Upload(ctx, parentID, driveName, f, info.ModTime()); err != nil {
 		return err
 	}
-	fmt.Fprintf(os.Stderr, "アップロード: %s -> drive:%s\n", localPath, path.Join(destDrivePath, name))
+	fmt.Fprintf(os.Stderr, "アップロード: %s -> drive:%s\n", localPath, path.Join(destDrivePath, driveName))
 	return nil
 }
 
