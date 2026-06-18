@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"io"
 	"os"
+	"path"
 	"path/filepath"
 
 	"github.com/ToshihitoKon/gdr-cmd/internal/drive"
@@ -222,7 +223,7 @@ func uploadSources(ctx context.Context, sources []loc.Location, dest loc.Locatio
 
 	var firstErr error
 	for _, lp := range localPaths {
-		if err := uploadPath(ctx, client, lp, destFolderID); err != nil {
+		if err := uploadPath(ctx, client, lp, destFolderID, dest.Path); err != nil {
 			fmt.Fprintf(os.Stderr, "cp: %v\n", err)
 			if firstErr == nil {
 				firstErr = err
@@ -233,7 +234,8 @@ func uploadSources(ctx context.Context, sources []loc.Location, dest loc.Locatio
 }
 
 // uploadPath はローカルのファイル/ディレクトリを Drive の parentID 直下へ上げる。
-func uploadPath(ctx context.Context, client *drive.Client, localPath, parentID string) error {
+// destDrivePath は parentID に対応する Drive 絶対パスで、ログ表示に使う。
+func uploadPath(ctx context.Context, client *drive.Client, localPath, parentID, destDrivePath string) error {
 	info, err := os.Stat(localPath)
 	if err != nil {
 		return fmt.Errorf("%s: %w", localPath, err)
@@ -248,23 +250,25 @@ func uploadPath(ctx context.Context, client *drive.Client, localPath, parentID s
 		if err != nil {
 			return err
 		}
+		subDrivePath := path.Join(destDrivePath, info.Name())
 		entries, err := os.ReadDir(localPath)
 		if err != nil {
 			return fmt.Errorf("ディレクトリの読み取りに失敗しました (%s): %w", localPath, err)
 		}
 		for _, e := range entries {
-			if err := uploadPath(ctx, client, filepath.Join(localPath, e.Name()), sub.ID); err != nil {
+			if err := uploadPath(ctx, client, filepath.Join(localPath, e.Name()), sub.ID, subDrivePath); err != nil {
 				return err
 			}
 		}
 		return nil
 	}
 
-	return uploadFile(ctx, client, localPath, info, parentID)
+	return uploadFile(ctx, client, localPath, info, parentID, destDrivePath)
 }
 
 // uploadFile は 1 つのローカルファイルを Drive へアップロードする。
-func uploadFile(ctx context.Context, client *drive.Client, localPath string, info os.FileInfo, parentID string) error {
+// destDrivePath はアップロード先フォルダの Drive 絶対パス。
+func uploadFile(ctx context.Context, client *drive.Client, localPath string, info os.FileInfo, parentID, destDrivePath string) error {
 	f, err := os.Open(localPath)
 	if err != nil {
 		return fmt.Errorf("%s: %w", localPath, err)
@@ -275,7 +279,7 @@ func uploadFile(ctx context.Context, client *drive.Client, localPath string, inf
 	if _, err := client.Upload(ctx, parentID, name, f, info.ModTime()); err != nil {
 		return err
 	}
-	fmt.Fprintf(os.Stderr, "アップロード: %s -> drive:%s\n", localPath, name)
+	fmt.Fprintf(os.Stderr, "アップロード: %s -> drive:%s\n", localPath, path.Join(destDrivePath, name))
 	return nil
 }
 
