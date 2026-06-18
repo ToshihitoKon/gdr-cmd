@@ -122,9 +122,11 @@ func copyNodeDown(ctx context.Context, client *drive.Client, node drive.Node, de
 		if !cpRecursive {
 			return fmt.Errorf("%s はフォルダです (-r を指定してください)", node.Path)
 		}
-		target := filepath.Join(dest, node.File.Name)
-		if !destIsDir {
-			target = dest
+		target := dest
+		if destIsDir {
+			// 同名の Drive フォルダが複数あっても 1 つのローカルディレクトリへ
+			// マージして中身が混ざらないよう、出力ディレクトリ名を一意化する。
+			target = uniquePath(dest, node.File.Name, used)
 		}
 		return downloadFolder(ctx, client, node.File.ID, target)
 	}
@@ -142,6 +144,8 @@ func copyNodeDown(ctx context.Context, client *drive.Client, node drive.Node, de
 }
 
 // downloadFolder はフォルダ配下を再帰的にダウンロードする。
+// 同一フォルダ内に同名の子 (Drive は許容) があっても上書きで失わないよう、
+// この階層専用の used で出力名を一意化する。
 func downloadFolder(ctx context.Context, client *drive.Client, folderID, target string) error {
 	if err := os.MkdirAll(target, 0o755); err != nil {
 		return fmt.Errorf("ディレクトリの作成に失敗しました (%s): %w", target, err)
@@ -150,16 +154,17 @@ func downloadFolder(ctx context.Context, client *drive.Client, folderID, target 
 	if err != nil {
 		return err
 	}
+	used := make(map[string]struct{})
 	for _, child := range children {
 		switch {
 		case child.IsFolder():
-			if err := downloadFolder(ctx, client, child.ID, filepath.Join(target, child.Name)); err != nil {
+			if err := downloadFolder(ctx, client, child.ID, uniquePath(target, child.Name, used)); err != nil {
 				return err
 			}
 		case child.IsGoogleDoc():
 			fmt.Fprintf(os.Stderr, "cp: スキップ (Google ネイティブ形式は未対応): %s/%s\n", target, child.Name)
 		default:
-			if err := downloadFile(ctx, client, child, filepath.Join(target, child.Name)); err != nil {
+			if err := downloadFile(ctx, client, child, uniquePath(target, child.Name, used)); err != nil {
 				return err
 			}
 		}
