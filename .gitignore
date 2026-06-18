@@ -1,0 +1,11 @@
+# ビルド成果物
+/gdr
+*.exe
+
+# テスト・カバレッジ
+*.out
+*.test
+
+# 認証情報 (誤ってリポジトリに置いた場合の保険)
+credentials.json
+token.json
