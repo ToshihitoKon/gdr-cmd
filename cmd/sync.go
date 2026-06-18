@@ -8,6 +8,7 @@ import (
 	"path"
 	"path/filepath"
 	"sort"
+	"strings"
 	"time"
 
 	"github.com/ToshihitoKon/gdr-cmd/internal/drive"
@@ -132,9 +133,25 @@ func syncLocalToDrive(ctx context.Context, localRoot, driveRoot string) error {
 	}
 
 	// 相対パスを浅い順に処理し、フォルダを先に作ってからファイルを上げる。
+	// 型不一致 (片方がフォルダ、もう片方がファイル) のサブツリーはまるごとスキップする。
+	var skipSubtrees []string
 	for _, rel := range sortedKeys(srcTree) {
 		se := srcTree[rel]
 		de, exists := dstTree[rel]
+
+		if isUnderAny(rel, skipSubtrees) {
+			continue
+		}
+
+		// SOURCE と DEST で種別 (フォルダ/ファイル) が食い違う場合は、誤って
+		// フォルダをファイルで上書きしたり逆をしたりしないよう、スキップする。
+		if exists && se.isDir != de.isDir {
+			fmt.Fprintf(os.Stderr, "sync: スキップ (種別がコピー先と異なります): drive:%s\n", path.Join(driveRoot, rel))
+			if se.isDir {
+				skipSubtrees = append(skipSubtrees, rel)
+			}
+			continue
+		}
 
 		if se.isDir {
 			if !exists {
@@ -276,10 +293,26 @@ func syncDriveToLocal(ctx context.Context, driveRoot, localRoot string) error {
 		return err
 	}
 
+	// 型不一致 (片方がフォルダ、もう片方がファイル) のサブツリーはまるごとスキップする。
+	var skipSubtrees []string
 	for _, rel := range sortedKeys(srcTree) {
 		se := srcTree[rel]
 		de, exists := dstTree[rel]
 		localPath := filepath.Join(localRoot, filepath.FromSlash(rel))
+
+		if isUnderAny(rel, skipSubtrees) {
+			continue
+		}
+
+		// SOURCE(Drive) と DEST(ローカル) で種別が食い違う場合はスキップする
+		// (フォルダのある場所へファイルを書く/その逆で os.MkdirAll などが失敗するため)。
+		if exists && se.isDir != de.isDir {
+			fmt.Fprintf(os.Stderr, "sync: スキップ (種別がコピー先と異なります): %s\n", localPath)
+			if se.isDir {
+				skipSubtrees = append(skipSubtrees, rel)
+			}
+			continue
+		}
 
 		if se.isDir {
 			if !exists {
@@ -459,6 +492,17 @@ func sortedKeys(tree map[string]entry) []string {
 		return keys[i] < keys[j]
 	})
 	return keys
+}
+
+// isUnderAny は相対パス rel が prefixes のいずれかと一致するか、その配下かを返す。
+// 型不一致でスキップしたフォルダのサブツリー全体を除外するために使う。
+func isUnderAny(rel string, prefixes []string) bool {
+	for _, p := range prefixes {
+		if rel == p || strings.HasPrefix(rel, p+"/") {
+			return true
+		}
+	}
+	return false
 }
 
 // pathDepth は相対パスの階層の深さ ("/" の数 + 1) を返す。
