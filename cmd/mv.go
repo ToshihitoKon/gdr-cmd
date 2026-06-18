@@ -158,6 +158,20 @@ func renameTo(ctx context.Context, client *drive.Client, src drive.Node, destPat
 		fmt.Fprintf(os.Stderr, "移動: 変更なし: drive:%s\n", src.Path)
 		return nil
 	}
+
+	// コピー先に同名のファイル/フォルダが既にある場合、Drive は重複を許すが
+	// 黙って二重に作ると誤って上書きしたように見える。衝突として明示エラーにする
+	// (自分自身は除く)。
+	siblings, err := client.ListChildrenByName(ctx, destParentID, destName)
+	if err != nil {
+		return err
+	}
+	for _, s := range siblings {
+		if s.ID != src.File.ID {
+			return fmt.Errorf("コピー先に同名が既に存在します (上書きは未対応): %s", destPath)
+		}
+	}
+
 	if err := client.MoveRename(ctx, src.File.ID, newParentID, src.ParentID, newName); err != nil {
 		return err
 	}
