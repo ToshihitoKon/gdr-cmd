@@ -17,34 +17,35 @@ var cpRecursive bool
 
 var cpCmd = &cobra.Command{
 	Use:   "cp SOURCE... DEST",
-	Short: "Drive とローカルの間でファイルをコピーする",
-	Long: `Drive とローカルの間でファイルをコピー (ダウンロード/アップロード) します。
+	Short: "Copy files between Drive and local",
+	Long: `Copy files between Drive and local (download/upload).
 
-Drive 側のパスは drive: プレフィックスで明示します (例 drive:/Documents/a.pdf)。
-プレフィックスの無いパスはローカルとして扱います。方向は両端の種別で決まります:
+Drive-side paths are marked with the drive: prefix (e.g. drive:/Documents/a.pdf).
+Paths without the prefix are treated as local. The direction is determined by the
+kind of each end:
 
-  drive: → ローカル … ダウンロード
-  ローカル → drive: … アップロード
+  drive: -> local ... download
+  local -> drive: ... upload
 
-SOURCE が複数 (または glob で複数) にマッチする場合、DEST はディレクトリで
-なければなりません。フォルダを扱うには -r を指定します。Drive のワイルドカード
-(*, ?, [...]) とローカルの glob の両方に対応します。
+If SOURCE matches multiple entries (or via glob), DEST must be a directory.
+Use -r to handle folders. Both Drive wildcards (*, ?, [...]) and local globs
+are supported.
 
-Google ネイティブ形式 (Google ドキュメント等) はダウンロードできないためスキップします。
+Google-native format (Google Docs, etc.) cannot be downloaded and is skipped.
 
-例:
-  gdr cp drive:/Documents/report.pdf .          # ダウンロード
-  gdr cp drive:/Documents/*.pdf ./pdfs/          # 複数ダウンロード
-  gdr cp -r drive:/Documents/project ./backup/   # フォルダをダウンロード
-  gdr cp ./report.pdf drive:/Documents/          # アップロード
-  gdr cp -r ./project drive:/backup/             # フォルダをアップロード`,
+Examples:
+  gdr cp drive:/Documents/report.pdf .          # download
+  gdr cp drive:/Documents/*.pdf ./pdfs/          # download multiple
+  gdr cp -r drive:/Documents/project ./backup/   # download a folder
+  gdr cp ./report.pdf drive:/Documents/          # upload
+  gdr cp -r ./project drive:/backup/             # upload a folder`,
 	Args:              cobra.MinimumNArgs(2),
 	RunE:              runCp,
 	ValidArgsFunction: completeCpArgs,
 }
 
 func init() {
-	cpCmd.Flags().BoolVarP(&cpRecursive, "recursive", "r", false, "フォルダを再帰的にコピーする")
+	cpCmd.Flags().BoolVarP(&cpRecursive, "recursive", "r", false, "copy folders recursively")
 	rootCmd.AddCommand(cpCmd)
 }
 
@@ -55,13 +56,13 @@ func runCp(cmd *cobra.Command, args []string) error {
 	rawDest := args[len(args)-1]
 	dest := loc.Parse(rawDest)
 
-	// SOURCE はすべて同じ側 (全部 Drive か全部ローカル) であることを要求する。
-	// 方向が一意に定まらない混在を避けるため。
+	// Require all SOURCE entries to be on the same side (all Drive or all local)
+	// to avoid a mix where the direction can't be determined uniquely.
 	sources := make([]loc.Location, len(rawSources))
 	for i, s := range rawSources {
 		sources[i] = loc.Parse(s)
 		if sources[i].Kind != sources[0].Kind {
-			return fmt.Errorf("コピー元は Drive とローカルを混在できません")
+			return fmt.Errorf("sources cannot mix Drive and local")
 		}
 	}
 	srcKind := sources[0].Kind
@@ -72,13 +73,13 @@ func runCp(cmd *cobra.Command, args []string) error {
 	case srcKind == loc.Local && dest.IsDrive():
 		return uploadSources(ctx, sources, dest, rawDest)
 	case srcKind == loc.Drive && dest.IsDrive():
-		return fmt.Errorf("Drive 内のコピーは未対応です。移動なら `gdr mv` を使ってください")
-	default: // ローカル → ローカル
-		return fmt.Errorf("ローカル同士のコピーは OS の cp を使ってください。Drive を含む場合は drive: を付けてください")
+		return fmt.Errorf("copy within Drive is not supported; use `gdr mv` to move")
+	default: // local -> local
+		return fmt.Errorf("use the OS cp for local-to-local copies; add drive: when Drive is involved")
 	}
 }
 
-// ---- ダウンロード (Drive → ローカル) ----
+// ---- Download (Drive -> local) ----
 
 func downloadSources(ctx context.Context, sources []loc.Location, dest loc.Location, rawDest string) error {
 	client, err := drive.New(ctx)
@@ -93,14 +94,14 @@ func downloadSources(ctx context.Context, sources []loc.Location, dest loc.Locat
 			return err
 		}
 		if len(nodes) == 0 {
-			return fmt.Errorf("該当なし: %s", src)
+			return fmt.Errorf("no match: %s", src)
 		}
 		matched = append(matched, nodes...)
 	}
 
 	destIsDir := isExistingDir(dest.Path)
 	if len(matched) > 1 && !destIsDir {
-		return fmt.Errorf("コピー元が複数あります。コピー先 %q は既存のディレクトリである必要があります", dest.Path)
+		return fmt.Errorf("multiple sources; destination %q must be an existing directory", dest.Path)
 	}
 
 	used := make(map[string]struct{})
@@ -116,23 +117,23 @@ func downloadSources(ctx context.Context, sources []loc.Location, dest loc.Locat
 	return firstErr
 }
 
-// copyNodeDown は 1 つの Drive Node をローカルへダウンロードする。
+// copyNodeDown downloads a single Drive node to local.
 func copyNodeDown(ctx context.Context, client *drive.Client, node drive.Node, dest string, destIsDir bool, used map[string]struct{}) error {
 	if node.File.IsFolder() {
 		if !cpRecursive {
-			return fmt.Errorf("%s はフォルダです (-r を指定してください)", node.Path)
+			return fmt.Errorf("%s is a folder (use -r)", node.Path)
 		}
 		target := dest
 		if destIsDir {
-			// 同名の Drive フォルダが複数あっても 1 つのローカルディレクトリへ
-			// マージして中身が混ざらないよう、出力ディレクトリ名を一意化する。
+			// Make the output directory name unique so multiple same-named Drive
+			// folders don't merge into one local directory and mix their contents.
 			target = uniquePath(dest, node.File.Name, used)
 		}
 		return downloadFolder(ctx, client, node.File.ID, target)
 	}
 
 	if node.File.IsGoogleDoc() {
-		fmt.Fprintf(os.Stderr, "cp: スキップ (Google ネイティブ形式は未対応): %s\n", node.Path)
+		fmt.Fprintf(os.Stderr, "cp: skip (Google-native format not supported): %s\n", node.Path)
 		return nil
 	}
 
@@ -143,12 +144,12 @@ func copyNodeDown(ctx context.Context, client *drive.Client, node drive.Node, de
 	return downloadFile(ctx, client, node.File, outPath)
 }
 
-// downloadFolder はフォルダ配下を再帰的にダウンロードする。
-// 同一フォルダ内に同名の子 (Drive は許容) があっても上書きで失わないよう、
-// この階層専用の used で出力名を一意化する。
+// downloadFolder recursively downloads the contents of a folder.
+// Same-named children within a folder (which Drive allows) are kept by making
+// output names unique via a used set scoped to this level, so none are lost to overwrite.
 func downloadFolder(ctx context.Context, client *drive.Client, folderID, target string) error {
 	if err := os.MkdirAll(target, 0o755); err != nil {
-		return fmt.Errorf("ディレクトリの作成に失敗しました (%s): %w", target, err)
+		return fmt.Errorf("failed to create directory (%s): %w", target, err)
 	}
 	children, err := client.ListChildren(ctx, folderID)
 	if err != nil {
@@ -162,7 +163,7 @@ func downloadFolder(ctx context.Context, client *drive.Client, folderID, target 
 				return err
 			}
 		case child.IsGoogleDoc():
-			fmt.Fprintf(os.Stderr, "cp: スキップ (Google ネイティブ形式は未対応): %s/%s\n", target, child.Name)
+			fmt.Fprintf(os.Stderr, "cp: skip (Google-native format not supported): %s/%s\n", target, child.Name)
 		default:
 			if err := downloadFile(ctx, client, child, uniquePath(target, child.Name, used)); err != nil {
 				return err
@@ -172,7 +173,7 @@ func downloadFolder(ctx context.Context, client *drive.Client, folderID, target 
 	return nil
 }
 
-// downloadFile は 1 ファイルをダウンロードして outPath に書き出す。
+// downloadFile downloads a single file and writes it to outPath.
 func downloadFile(ctx context.Context, client *drive.Client, f drive.File, outPath string) error {
 	body, err := client.Download(ctx, f.ID)
 	if err != nil {
@@ -182,28 +183,28 @@ func downloadFile(ctx context.Context, client *drive.Client, f drive.File, outPa
 
 	if dir := filepath.Dir(outPath); dir != "" {
 		if err := os.MkdirAll(dir, 0o755); err != nil {
-			return fmt.Errorf("出力先ディレクトリの作成に失敗しました (%s): %w", dir, err)
+			return fmt.Errorf("failed to create output directory (%s): %w", dir, err)
 		}
 	}
 	out, err := os.Create(outPath)
 	if err != nil {
-		return fmt.Errorf("出力ファイルの作成に失敗しました (%s): %w", outPath, err)
+		return fmt.Errorf("failed to create output file (%s): %w", outPath, err)
 	}
 
 	if _, err := io.Copy(out, body); err != nil {
 		out.Close()
-		return fmt.Errorf("%s の書き込みに失敗しました: %w", outPath, err)
+		return fmt.Errorf("failed to write %s: %w", outPath, err)
 	}
-	// 書き込みエラーは Close 時にのみ表面化することがある (例: ENOSPC) ため、
-	// Close の戻り値も確認して切り詰めを成功扱いにしない。
+	// Write errors may only surface at Close time (e.g. ENOSPC), so check the
+	// Close return value too and don't treat a truncated write as success.
 	if err := out.Close(); err != nil {
-		return fmt.Errorf("%s のクローズに失敗しました: %w", outPath, err)
+		return fmt.Errorf("failed to close %s: %w", outPath, err)
 	}
-	fmt.Fprintf(os.Stderr, "ダウンロード: %s -> %s\n", f.Name, outPath)
+	fmt.Fprintf(os.Stderr, "Download: %s -> %s\n", f.Name, outPath)
 	return nil
 }
 
-// ---- アップロード (ローカル → Drive) ----
+// ---- Upload (local -> Drive) ----
 
 func uploadSources(ctx context.Context, sources []loc.Location, dest loc.Location, rawDest string) error {
 	client, err := drive.New(ctx)
@@ -211,22 +212,22 @@ func uploadSources(ctx context.Context, sources []loc.Location, dest loc.Locatio
 		return err
 	}
 
-	// ローカルの glob を展開してコピー元を集める。
+	// Expand local globs to gather sources.
 	var localPaths []string
 	for _, src := range sources {
 		matches, err := filepath.Glob(src.Path)
 		if err != nil {
-			return fmt.Errorf("不正なパターン %q: %w", src.Path, err)
+			return fmt.Errorf("invalid pattern %q: %w", src.Path, err)
 		}
 		if len(matches) == 0 {
-			return fmt.Errorf("該当なし: %s", src.Path)
+			return fmt.Errorf("no match: %s", src.Path)
 		}
 		localPaths = append(localPaths, matches...)
 	}
 
-	// 宛先をファイル名指定として扱うか、フォルダとして扱うかを決める。
-	// 単一ファイルを、末尾スラッシュ無し・既存フォルダでない drive: パスへ送る場合だけ
-	// 「リネーム付きアップロード」とみなし、それ以外は dest をフォルダとして扱う。
+	// Decide whether to treat the destination as a filename or as a folder.
+	// Only a single file sent to a drive: path with no trailing slash and no
+	// existing folder counts as an "upload with rename"; otherwise dest is a folder.
 	rename, err := isSingleFileRename(ctx, client, localPaths, rawDest, dest.Path)
 	if err != nil {
 		return err
@@ -244,7 +245,7 @@ func uploadSources(ctx context.Context, sources []loc.Location, dest loc.Locatio
 		return uploadFileAs(ctx, client, localPaths[0], info, parentID, name, parentPath)
 	}
 
-	// コピー先の Drive フォルダを確保する (mkdir -p 相当)。
+	// Ensure the destination Drive folder exists (like mkdir -p).
 	destFolderID, err := client.EnsureFolderPath(ctx, dest.Path)
 	if err != nil {
 		return err
@@ -262,10 +263,11 @@ func uploadSources(ctx context.Context, sources []loc.Location, dest loc.Locatio
 	return firstErr
 }
 
-// isSingleFileRename は宛先をファイル名指定 (リネーム付きアップロード) として
-// 扱うべきかを返す。単一のローカルファイルを、末尾スラッシュ無し・かつ Drive 上に
-// 既存フォルダでないパスへ送る場合だけ true。複数元・ディレクトリ・末尾スラッシュ・
-// 既存フォルダ宛はすべてフォルダ扱い (false)。フォルダ判定での API 障害は err で返す。
+// isSingleFileRename reports whether the destination should be treated as a
+// filename (upload with rename). True only when a single local file is sent to a
+// path with no trailing slash that is not an existing Drive folder. Multiple
+// sources, directories, trailing slash, and existing-folder destinations are all
+// treated as a folder (false). An API failure during the folder check is returned as err.
 func isSingleFileRename(ctx context.Context, client *drive.Client, localPaths []string, rawDest, destPath string) (bool, error) {
 	if len(localPaths) != 1 || loc.HasTrailingSlash(rawDest) {
 		return false, nil
@@ -273,7 +275,7 @@ func isSingleFileRename(ctx context.Context, client *drive.Client, localPaths []
 	if info, err := os.Stat(localPaths[0]); err != nil || info.IsDir() {
 		return false, nil
 	}
-	// 宛先が既に Drive 上のフォルダなら、その中へ入れる (ファイル名指定ではない)。
+	// If the destination is already a Drive folder, put the file inside it (not a filename).
 	_, isFolder, err := resolveExistingFolder(ctx, client, destPath)
 	if err != nil {
 		return false, err
@@ -281,8 +283,8 @@ func isSingleFileRename(ctx context.Context, client *drive.Client, localPaths []
 	return !isFolder, nil
 }
 
-// uploadPath はローカルのファイル/ディレクトリを Drive の parentID 直下へ上げる。
-// destDrivePath は parentID に対応する Drive 絶対パスで、ログ表示に使う。
+// uploadPath uploads a local file/directory directly under the Drive parentID.
+// destDrivePath is the Drive absolute path corresponding to parentID, used for log output.
 func uploadPath(ctx context.Context, client *drive.Client, localPath, parentID, destDrivePath string) error {
 	info, err := os.Stat(localPath)
 	if err != nil {
@@ -291,9 +293,9 @@ func uploadPath(ctx context.Context, client *drive.Client, localPath, parentID, 
 
 	if info.IsDir() {
 		if !cpRecursive {
-			return fmt.Errorf("%s はディレクトリです (-r を指定してください)", localPath)
+			return fmt.Errorf("%s is a directory (use -r)", localPath)
 		}
-		// parentID 直下に同名フォルダを確保 (既存なら再利用) して再帰アップロードする。
+		// Ensure a same-named folder under parentID (reuse if it exists) and upload recursively.
 		subDrivePath := path.Join(destDrivePath, info.Name())
 		subID, err := client.EnsureChildFolder(ctx, parentID, info.Name(), subDrivePath)
 		if err != nil {
@@ -301,7 +303,7 @@ func uploadPath(ctx context.Context, client *drive.Client, localPath, parentID, 
 		}
 		entries, err := os.ReadDir(localPath)
 		if err != nil {
-			return fmt.Errorf("ディレクトリの読み取りに失敗しました (%s): %w", localPath, err)
+			return fmt.Errorf("failed to read directory (%s): %w", localPath, err)
 		}
 		for _, e := range entries {
 			if err := uploadPath(ctx, client, filepath.Join(localPath, e.Name()), subID, subDrivePath); err != nil {
@@ -314,15 +316,15 @@ func uploadPath(ctx context.Context, client *drive.Client, localPath, parentID, 
 	return uploadFile(ctx, client, localPath, info, parentID, destDrivePath)
 }
 
-// uploadFile は 1 つのローカルファイルを、ローカルのファイル名のまま Drive の
-// parentID 直下へアップロードする。
+// uploadFile uploads a single local file directly under the Drive parentID,
+// keeping the local filename.
 func uploadFile(ctx context.Context, client *drive.Client, localPath string, info os.FileInfo, parentID, destDrivePath string) error {
 	return uploadFileAs(ctx, client, localPath, info, parentID, filepath.Base(localPath), destDrivePath)
 }
 
-// uploadFileAs は 1 つのローカルファイルを Drive へ driveName という名前で
-// アップロードする (リネーム付きアップロードに使う)。
-// destDrivePath はアップロード先フォルダの Drive 絶対パスで、ログ表示に使う。
+// uploadFileAs uploads a single local file to Drive under the name driveName
+// (used for upload with rename).
+// destDrivePath is the Drive absolute path of the destination folder, used for log output.
 func uploadFileAs(ctx context.Context, client *drive.Client, localPath string, info os.FileInfo, parentID, driveName, destDrivePath string) error {
 	f, err := os.Open(localPath)
 	if err != nil {
@@ -333,27 +335,27 @@ func uploadFileAs(ctx context.Context, client *drive.Client, localPath string, i
 	if _, err := client.Upload(ctx, parentID, driveName, f, info.ModTime()); err != nil {
 		return err
 	}
-	fmt.Fprintf(os.Stderr, "アップロード: %s -> drive:%s\n", localPath, path.Join(destDrivePath, driveName))
+	fmt.Fprintf(os.Stderr, "Upload: %s -> drive:%s\n", localPath, path.Join(destDrivePath, driveName))
 	return nil
 }
 
-// ---- 補完・補助 ----
+// ---- Completion / helpers ----
 
-// completeCpArgs は cp の引数を補完する。drive: で始まる入力は Drive パスを
-// 動的補完し、それ以外はシェルの既定ファイル補完に委ねる。
+// completeCpArgs completes cp arguments. Input starting with drive: gets dynamic
+// Drive path completion; otherwise it defers to the shell's default file completion.
 func completeCpArgs(cmd *cobra.Command, args []string, toComplete string) ([]string, cobra.ShellCompDirective) {
 	return completeLocationArg(cmd, toComplete)
 }
 
-// isExistingDir はパスが既存のディレクトリかを返す。
+// isExistingDir reports whether the path is an existing directory.
 func isExistingDir(p string) bool {
 	info, err := os.Stat(p)
 	return err == nil && info.IsDir()
 }
 
-// uniquePath は dir 配下で name が衝突しないパスを返す。
-// 既に使用済み (このコマンド実行内) か、ディスク上に存在する場合は
-// "name (1).ext" のように連番を付ける。
+// uniquePath returns a path under dir where name does not collide.
+// If it is already used (within this command run) or exists on disk, it appends
+// a sequence number like "name (1).ext".
 func uniquePath(dir, name string, used map[string]struct{}) string {
 	candidate := filepath.Join(dir, name)
 	if !isUsed(candidate, used) {
@@ -371,7 +373,7 @@ func uniquePath(dir, name string, used map[string]struct{}) string {
 	}
 }
 
-// isUsed は候補パスが既に使用済みか実在するかを返す。
+// isUsed reports whether the candidate path is already used or exists on disk.
 func isUsed(path string, used map[string]struct{}) bool {
 	if _, ok := used[path]; ok {
 		return true

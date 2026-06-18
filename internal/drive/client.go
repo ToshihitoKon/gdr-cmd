@@ -1,8 +1,9 @@
-// Package drive は Google Drive API (v3) の薄いラッパーを提供する。
+// Package drive provides a thin wrapper around the Google Drive API (v3).
 //
-// 上位レイヤ (パス解決・glob 展開・コマンド) が必要とする操作だけを公開する:
-// 子要素の列挙、ルートの取得、ファイルのダウンロード。マイドライブ起点の
-// 操作に絞り、共有ドライブは対象外とする。
+// It exposes only the operations needed by the upper layers (path resolution,
+// glob expansion, commands): listing children, getting the root, and
+// downloading files. It is limited to operations rooted at My Drive; shared
+// drives are out of scope.
 package drive
 
 import (
@@ -16,24 +17,25 @@ import (
 	"google.golang.org/api/option"
 )
 
-// folderMIME は Drive におけるフォルダの MIME タイプ。
+// folderMIME is the MIME type of a folder in Drive.
 const folderMIME = "application/vnd.google-apps.folder"
 
-// googleAppPrefix は Google ネイティブ形式 (Docs/Sheets 等) の MIME 接頭辞。
-// これらは通常のバイナリダウンロードができず Export が必要になる。
+// googleAppPrefix is the MIME prefix of Google-native formats (Docs/Sheets, etc.).
+// These cannot be downloaded as plain binaries and require Export instead.
 const googleAppPrefix = "application/vnd.google-apps."
 
-// listFields は一覧取得で要求するフィールド。必要なものだけに絞って
-// レスポンスを軽くする。nextPageToken はページングに必須。
+// listFields are the fields requested when listing. It is narrowed to only what
+// is needed to keep the response light. nextPageToken is required for paging.
 const listFields = "nextPageToken, files(id, name, mimeType, size, modifiedTime, md5Checksum)"
 
-// Client は Drive API サービスをラップする。
+// Client wraps the Drive API service.
 type Client struct {
 	svc *drive.Service
 }
 
-// File は Drive 上のファイル/フォルダの最小限のメタデータ。
-// drive.File をそのまま外へ出さず、上位レイヤが扱いやすい形に整える。
+// File is the minimal metadata of a file/folder on Drive.
+// Rather than exposing drive.File directly, it is shaped into a form that is
+// easy for the upper layers to handle.
 type File struct {
 	ID           string
 	Name         string
@@ -43,18 +45,18 @@ type File struct {
 	MD5          string
 }
 
-// IsFolder はフォルダかどうかを返す。
+// IsFolder reports whether this is a folder.
 func (f File) IsFolder() bool {
 	return f.MimeType == folderMIME
 }
 
-// IsGoogleDoc は Google ネイティブ形式 (Docs/Sheets 等) かどうかを返す。
-// これらは Export しないとダウンロードできない。
+// IsGoogleDoc reports whether this is a Google-native format (Docs/Sheets, etc.).
+// These cannot be downloaded without an Export.
 func (f File) IsGoogleDoc() bool {
 	return strings.HasPrefix(f.MimeType, googleAppPrefix) && !f.IsFolder()
 }
 
-// New は認証済みクライアントから Drive クライアントを生成する。
+// New creates a Drive client from an authenticated client.
 func New(ctx context.Context) (*Client, error) {
 	authn, err := auth.New()
 	if err != nil {
@@ -66,41 +68,42 @@ func New(ctx context.Context) (*Client, error) {
 	}
 	svc, err := drive.NewService(ctx, option.WithHTTPClient(httpClient))
 	if err != nil {
-		return nil, fmt.Errorf("Drive サービスの初期化に失敗しました: %w", err)
+		return nil, fmt.Errorf("failed to initialize the Drive service: %w", err)
 	}
 	return &Client{svc: svc}, nil
 }
 
-// RootID はマイドライブのルートフォルダ ID を返す。
-// Drive API ではエイリアス "root" でルートを参照できるが、parent 比較などで
-// 実体 ID が要るため解決して返す。
+// RootID returns the My Drive root folder ID.
+// The Drive API lets you reference the root with the alias "root", but the
+// actual ID is needed for things like parent comparison, so it is resolved and returned.
 func (c *Client) RootID(ctx context.Context) (string, error) {
 	f, err := c.svc.Files.Get("root").
 		Fields("id").
 		Context(ctx).
 		Do()
 	if err != nil {
-		return "", fmt.Errorf("ルートフォルダの取得に失敗しました: %w", err)
+		return "", fmt.Errorf("failed to get the root folder: %w", err)
 	}
 	return f.Id, nil
 }
 
-// ListChildren は指定フォルダ直下の (ゴミ箱を除く) 子要素を全件返す。
-// ページングは内部で処理する。
+// ListChildren returns all (non-trashed) children directly under the given folder.
+// Paging is handled internally.
 func (c *Client) ListChildren(ctx context.Context, parentID string) ([]File, error) {
 	query := fmt.Sprintf("'%s' in parents and trashed = false", escapeQueryValue(parentID))
 	return c.listByQuery(ctx, query)
 }
 
-// ListChildrenByName は指定フォルダ直下で name に完全一致する子要素を返す。
-// Drive は同名を許すため複数件返りうる。
+// ListChildrenByName returns the children directly under the given folder whose
+// name exactly matches name. Drive allows duplicate names, so multiple results
+// may be returned.
 func (c *Client) ListChildrenByName(ctx context.Context, parentID, name string) ([]File, error) {
 	query := fmt.Sprintf("'%s' in parents and name = '%s' and trashed = false",
 		escapeQueryValue(parentID), escapeQueryValue(name))
 	return c.listByQuery(ctx, query)
 }
 
-// listByQuery は Drive クエリを実行し、ページングしながら全件を集める。
+// listByQuery runs a Drive query and gathers all results while paging.
 func (c *Client) listByQuery(ctx context.Context, query string) ([]File, error) {
 	var files []File
 	pageToken := ""
@@ -116,7 +119,7 @@ func (c *Client) listByQuery(ctx context.Context, query string) ([]File, error) 
 		}
 		resp, err := call.Do()
 		if err != nil {
-			return nil, fmt.Errorf("ファイル一覧の取得に失敗しました: %w", err)
+			return nil, fmt.Errorf("failed to list files: %w", err)
 		}
 		for _, f := range resp.Files {
 			files = append(files, toFile(f))
@@ -129,19 +132,19 @@ func (c *Client) listByQuery(ctx context.Context, query string) ([]File, error) 
 	return files, nil
 }
 
-// Download はファイルの内容を読み出すための ReadCloser を返す。
-// Google ネイティブ形式には使えない (呼び出し側で IsGoogleDoc を確認すること)。
+// Download returns a ReadCloser for reading the file's content.
+// It cannot be used for Google-native formats (the caller must check IsGoogleDoc).
 func (c *Client) Download(ctx context.Context, fileID string) (io.ReadCloser, error) {
 	resp, err := c.svc.Files.Get(fileID).
 		Context(ctx).
 		Download()
 	if err != nil {
-		return nil, fmt.Errorf("ファイルのダウンロードに失敗しました: %w", err)
+		return nil, fmt.Errorf("failed to download the file: %w", err)
 	}
 	return resp.Body, nil
 }
 
-// toFile は drive.File を内部表現へ変換する。
+// toFile converts a drive.File into the internal representation.
 func toFile(f *drive.File) File {
 	return File{
 		ID:           f.Id,
@@ -153,9 +156,9 @@ func toFile(f *drive.File) File {
 	}
 }
 
-// escapeQueryValue は Drive クエリの文字列リテラルに値を埋め込めるよう
-// エスケープする。バックスラッシュとシングルクォートが特殊文字。
-// 参考: https://developers.google.com/drive/api/guides/ref-search-terms
+// escapeQueryValue escapes a value so it can be embedded in a Drive query string
+// literal. The backslash and single quote are the special characters.
+// Reference: https://developers.google.com/drive/api/guides/ref-search-terms
 func escapeQueryValue(s string) string {
 	s = strings.ReplaceAll(s, `\`, `\\`)
 	s = strings.ReplaceAll(s, `'`, `\'`)

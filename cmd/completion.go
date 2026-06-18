@@ -9,20 +9,22 @@ import (
 	"github.com/spf13/cobra"
 )
 
-// completionTimeout は Tab 補完時に Drive API 呼び出しへ与える制限時間。
-// 補完はインタラクティブなので、遅延でシェルが固まらないよう短めにする。
+// completionTimeout bounds the Drive API calls made during Tab completion.
+// Completion is interactive, so keep it short to avoid freezing the shell.
 const completionTimeout = 3 * time.Second
 
-// completeDrivePath は Drive 上のパスを動的に補完する ValidArgsFunction。
+// completeDrivePath is a ValidArgsFunction that dynamically completes Drive paths.
 //
-// 入力中の toComplete (例 "/dir/fi") を「親パス + 接頭辞」に分け、親フォルダ
-// 直下の子要素のうち接頭辞に前方一致するものを候補として返す。フォルダ候補は
-// 末尾に "/" を付け、連続補完を促す。
+// It splits toComplete (e.g. "/dir/fi") into a parent path and a prefix, then
+// returns children directly under the parent folder whose names start with that
+// prefix. Folder candidates get a trailing "/" to encourage continued completion.
 //
-// 補完は失敗してもシェルを壊さないよう、エラー時は候補なし + NoFileComp を返す。
+// Completion must never break the shell, so on error it returns no candidates
+// plus NoFileComp.
 func completeDrivePath(cmd *cobra.Command, args []string, toComplete string) ([]string, cobra.ShellCompDirective) {
-	// 補完値にメタ文字が含まれる場合、Drive API での前方一致が困難なため
-	// ファイル補完を抑止しつつ何も返さない (利用者の入力を尊重)。
+	// When the value contains meta characters, prefix matching against the Drive
+	// API is hard, so suppress file completion and return nothing (respecting
+	// the user's input).
 	if strings.ContainsAny(toComplete, "*?[") {
 		return nil, cobra.ShellCompDirectiveNoFileComp
 	}
@@ -37,8 +39,8 @@ func completeDrivePath(cmd *cobra.Command, args []string, toComplete string) ([]
 		return nil, cobra.ShellCompDirectiveNoFileComp
 	}
 
-	// 親パスを解決する。glob を含まない単一フォルダのはずだが、念のため
-	// 解決結果のうちフォルダであるものすべての子要素を候補に含める。
+	// Resolve the parent path. It should be a single glob-free folder, but to be
+	// safe we include children of every folder among the resolved results.
 	parents, err := client.Resolve(ctx, parentPath)
 	if err != nil {
 		return nil, cobra.ShellCompDirectiveNoFileComp
@@ -67,31 +69,33 @@ func completeDrivePath(cmd *cobra.Command, args []string, toComplete string) ([]
 		}
 	}
 
-	// フォルダ候補は末尾が "/" なので、シェルが空白を付けないようにする。
+	// Folder candidates already end in "/", so tell the shell not to append a space.
 	directive := cobra.ShellCompDirectiveNoFileComp | cobra.ShellCompDirectiveNoSpace
 	return candidates, directive
 }
 
-// completeLocationArgs は cobra の ValidArgsFunction シグネチャに合わせた
-// completeLocationArg のラッパー。引数位置によらず同じ補完規則を適用する。
+// completeLocationArgs wraps completeLocationArg to match cobra's
+// ValidArgsFunction signature. The same completion rules apply regardless of
+// argument position.
 func completeLocationArgs(cmd *cobra.Command, args []string, toComplete string) ([]string, cobra.ShellCompDirective) {
 	return completeLocationArg(cmd, toComplete)
 }
 
-// completeLocationArg は drive: 記法に対応した引数補完を行う。
+// completeLocationArg completes arguments that support the drive: notation.
 //
-// 入力が "drive:" で始まれば Drive パスを動的補完し、候補にも "drive:" を
-// 付け直す。それ以外はローカルとみなし、シェルの既定ファイル補完に委ねる。
-// cp/sync/mkdir/rm/mv のように両端を取りうるコマンドで使う。
+// If the input starts with "drive:", it dynamically completes a Drive path and
+// re-attaches the "drive:" prefix to the candidates. Otherwise it is treated as
+// local and deferred to the shell's default file completion. Used by commands
+// that can take either side, such as cp/sync/mkdir/rm/mv.
 func completeLocationArg(cmd *cobra.Command, toComplete string) ([]string, cobra.ShellCompDirective) {
 	const prefix = "drive:"
 	if !strings.HasPrefix(toComplete, prefix) {
-		// ローカルパス: シェルにファイル補完させる。
+		// Local path: let the shell complete files.
 		return nil, cobra.ShellCompDirectiveDefault
 	}
 	drivePart := strings.TrimPrefix(toComplete, prefix)
 	candidates, directive := completeDrivePath(cmd, nil, drivePart)
-	// 候補に drive: を付け直す。
+	// Re-attach the drive: prefix to the candidates.
 	prefixed := make([]string, len(candidates))
 	for i, c := range candidates {
 		prefixed[i] = prefix + c
@@ -99,17 +103,17 @@ func completeLocationArg(cmd *cobra.Command, toComplete string) ([]string, cobra
 	return prefixed, directive
 }
 
-// splitParentPrefix は補完入力を (親パス, 末尾要素の接頭辞) に分ける。
+// splitParentPrefix splits the completion input into (parent path, last-element prefix).
 //
 //	"/dir/fi" -> ("/dir", "fi")
 //	"/dir/"   -> ("/dir", "")
 //	"/fi"     -> ("/",    "fi")
-//	"fi"      -> ("/",    "fi")   (先頭スラッシュ無しはマイドライブ起点として扱う)
+//	"fi"      -> ("/",    "fi")   (a missing leading slash is treated as My Drive root)
 //	""        -> ("/",    "")
 func splitParentPrefix(toComplete string) (parent, prefix string) {
 	idx := strings.LastIndex(toComplete, "/")
 	if idx < 0 {
-		// スラッシュ無し: ルート直下の補完とみなす。
+		// No slash: treat it as completion directly under the root.
 		return "/", toComplete
 	}
 	parent = toComplete[:idx]
@@ -120,8 +124,8 @@ func splitParentPrefix(toComplete string) (parent, prefix string) {
 	return parent, prefix
 }
 
-// buildCandidate は親パスと子要素から補完候補文字列を組み立てる。
-// フォルダには末尾 "/" を付ける。
+// buildCandidate builds a completion candidate string from the parent path and
+// a child. Folders get a trailing "/".
 func buildCandidate(parentPath string, child drive.File) string {
 	var b strings.Builder
 	if parentPath == "/" {
