@@ -455,6 +455,12 @@ func buildDriveTree(ctx context.Context, client *drive.Client, rootID string) (m
 			if relBase != "" {
 				rel = relBase + "/" + ch.Name
 			}
+			// Drive は同一フォルダ内の同名を許すが、ツリーは相対パスをキーにする。
+			// 同名が複数あると 1 件しか扱えないため、黙って取りこぼさず警告する。
+			if _, dup := tree[rel]; dup {
+				fmt.Fprintf(os.Stderr, "sync: 警告: 同名が複数あるため 1 件のみ同期します: drive:%s\n", rel)
+				continue
+			}
 			modTime, _ := time.Parse(time.RFC3339, ch.ModifiedTime)
 			tree[rel] = entry{
 				size:        ch.Size,
