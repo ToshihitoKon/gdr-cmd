@@ -16,14 +16,15 @@ var (
 
 var rmCmd = &cobra.Command{
 	Use:   "rm drive:PATH...",
-	Short: "Drive 上のファイル/フォルダを削除する",
-	Long: `Drive 上のファイル/フォルダを削除します。パスは drive: プレフィックスで指定し、
-ワイルドカード (*, ?, [...]) を使えます。
+	Short: "Delete files/folders on Drive",
+	Long: `Delete files/folders on Drive. Specify the path with the drive: prefix;
+wildcards (*, ?, [...]) are supported.
 
-既定ではゴミ箱へ移動します (Drive のゴミ箱から復元可能)。--permanent を付けると
-ゴミ箱を経由せず完全に削除します (復元不可)。フォルダを削除するには -r が必要です。
+By default, items are moved to Trash (recoverable from Drive's trash). With
+--permanent, they are deleted without going through Trash (unrecoverable).
+Deleting a folder requires -r.
 
-例:
+Examples:
   gdr rm drive:/Documents/old.pdf
   gdr rm drive:/tmp/*.log
   gdr rm -r drive:/Documents/oldproject
@@ -34,8 +35,8 @@ var rmCmd = &cobra.Command{
 }
 
 func init() {
-	rmCmd.Flags().BoolVarP(&rmRecursive, "recursive", "r", false, "フォルダを (中身ごと) 削除する")
-	rmCmd.Flags().BoolVar(&rmPermanent, "permanent", false, "ゴミ箱を経由せず完全に削除する (復元不可)")
+	rmCmd.Flags().BoolVarP(&rmRecursive, "recursive", "r", false, "delete folders (and their contents)")
+	rmCmd.Flags().BoolVar(&rmPermanent, "permanent", false, "delete permanently without using Trash (unrecoverable)")
 	rootCmd.AddCommand(rmCmd)
 }
 
@@ -50,7 +51,7 @@ func runRm(cmd *cobra.Command, args []string) error {
 	for _, arg := range args {
 		l := loc.Parse(arg)
 		if !l.IsDrive() {
-			err := fmt.Errorf("rm は Drive のパスのみ対応します (drive: を付けてください): %s", arg)
+			err := fmt.Errorf("rm only supports Drive paths (add drive:): %s", arg)
 			fmt.Fprintln(os.Stderr, "rm:", err)
 			if firstErr == nil {
 				firstErr = err
@@ -67,7 +68,7 @@ func runRm(cmd *cobra.Command, args []string) error {
 			continue
 		}
 		if len(nodes) == 0 {
-			err := fmt.Errorf("該当なし: %s", arg)
+			err := fmt.Errorf("no match: %s", arg)
 			fmt.Fprintln(os.Stderr, "rm:", err)
 			if firstErr == nil {
 				firstErr = err
@@ -87,10 +88,10 @@ func runRm(cmd *cobra.Command, args []string) error {
 	return firstErr
 }
 
-// removeNode は 1 つの Node を削除する。フォルダは -r が無いと拒否する。
+// removeNode deletes a single node. Folders are rejected without -r.
 func removeNode(cmd *cobra.Command, client *drive.Client, node drive.Node) error {
 	if node.File.IsFolder() && !rmRecursive {
-		return fmt.Errorf("%s はフォルダです (-r を指定してください)", node.Path)
+		return fmt.Errorf("%s is a folder (use -r)", node.Path)
 	}
 
 	ctx := cmd.Context()
@@ -98,13 +99,13 @@ func removeNode(cmd *cobra.Command, client *drive.Client, node drive.Node) error
 		if err := client.Delete(ctx, node.File.ID); err != nil {
 			return fmt.Errorf("%s: %w", node.Path, err)
 		}
-		fmt.Fprintf(os.Stderr, "完全削除: drive:%s\n", node.Path)
+		fmt.Fprintf(os.Stderr, "Deleted permanently: drive:%s\n", node.Path)
 		return nil
 	}
 
 	if err := client.Trash(ctx, node.File.ID); err != nil {
 		return fmt.Errorf("%s: %w", node.Path, err)
 	}
-	fmt.Fprintf(os.Stderr, "ゴミ箱へ移動: drive:%s\n", node.Path)
+	fmt.Fprintf(os.Stderr, "Trashed: drive:%s\n", node.Path)
 	return nil
 }

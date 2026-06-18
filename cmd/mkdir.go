@@ -14,13 +14,13 @@ var mkdirParents bool
 
 var mkdirCmd = &cobra.Command{
 	Use:   "mkdir drive:PATH...",
-	Short: "Drive 上にフォルダを作成する",
-	Long: `Drive 上にフォルダを作成します。パスは drive: プレフィックスで指定します。
+	Short: "Create a folder on Drive",
+	Long: `Create a folder on Drive. Specify the path with the drive: prefix.
 
-既定では親フォルダが存在している必要があります。-p を付けると親フォルダごと
-作成し、既に存在していてもエラーにしません (mkdir -p と同じ)。
+By default the parent folder must already exist. With -p, parent folders are
+created too and an existing path is not an error (same as mkdir -p).
 
-例:
+Examples:
   gdr mkdir drive:/Documents/newdir
   gdr mkdir -p drive:/a/b/c`,
 	Args:              cobra.MinimumNArgs(1),
@@ -29,7 +29,7 @@ var mkdirCmd = &cobra.Command{
 }
 
 func init() {
-	mkdirCmd.Flags().BoolVarP(&mkdirParents, "parents", "p", false, "必要な親フォルダも作成し、既存でもエラーにしない")
+	mkdirCmd.Flags().BoolVarP(&mkdirParents, "parents", "p", false, "create parent folders as needed and don't error if they exist")
 	rootCmd.AddCommand(mkdirCmd)
 }
 
@@ -44,7 +44,7 @@ func runMkdir(cmd *cobra.Command, args []string) error {
 	for _, arg := range args {
 		l := loc.Parse(arg)
 		if !l.IsDrive() {
-			err := fmt.Errorf("mkdir は Drive のパスのみ対応します (drive: を付けてください): %s", arg)
+			err := fmt.Errorf("mkdir only supports Drive paths (add drive:): %s", arg)
 			fmt.Fprintln(os.Stderr, "mkdir:", err)
 			if firstErr == nil {
 				firstErr = err
@@ -61,23 +61,23 @@ func runMkdir(cmd *cobra.Command, args []string) error {
 	return firstErr
 }
 
-// makeDir は Drive 絶対パスのフォルダを作成する。
+// makeDir creates the folder at a Drive absolute path.
 func makeDir(ctx context.Context, client *drive.Client, absPath string) error {
 	if mkdirParents {
-		// 親ごと作成し、既存は再利用する (冪等)。
+		// Create parents too and reuse existing ones (idempotent).
 		_, err := client.EnsureFolderPath(ctx, absPath)
 		return err
 	}
 
 	parentPath, name := drive.SplitParent(absPath)
 	if name == "" {
-		return fmt.Errorf("ルートは作成できません")
+		return fmt.Errorf("cannot create the root")
 	}
 
-	// 親フォルダを解決する (存在しなければエラー)。
+	// Resolve the parent folder (error if it doesn't exist).
 	parents, err := client.Resolve(ctx, parentPath)
 	if err != nil {
-		return fmt.Errorf("親フォルダが見つかりません (%s)。-p を付けると親ごと作成します: %w", parentPath, err)
+		return fmt.Errorf("parent folder not found (%s); use -p to create parents too: %w", parentPath, err)
 	}
 	var parentID string
 	for _, p := range parents {
@@ -87,23 +87,23 @@ func makeDir(ctx context.Context, client *drive.Client, absPath string) error {
 		}
 	}
 	if parentID == "" {
-		return fmt.Errorf("親パスがフォルダではありません: %s", parentPath)
+		return fmt.Errorf("parent path is not a folder: %s", parentPath)
 	}
 
-	// 同名フォルダが既にあれば何もしない (冪等)。
+	// Do nothing if a same-named folder already exists (idempotent).
 	existing, err := client.ListChildrenByName(ctx, parentID, name)
 	if err != nil {
 		return err
 	}
 	for _, e := range existing {
 		if e.IsFolder() {
-			return fmt.Errorf("既に存在します: %s", absPath)
+			return fmt.Errorf("already exists: %s", absPath)
 		}
 	}
 
 	if _, err := client.Mkdir(ctx, parentID, name); err != nil {
 		return err
 	}
-	fmt.Fprintf(os.Stderr, "作成: drive:%s\n", absPath)
+	fmt.Fprintf(os.Stderr, "Created: drive:%s\n", absPath)
 	return nil
 }

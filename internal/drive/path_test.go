@@ -5,19 +5,19 @@ import (
 	"testing"
 )
 
-func Test_splitPath_変則的な区切りを正規化する(t *testing.T) {
+func Test_splitPath_NormalizesIrregularSeparators(t *testing.T) {
 	tests := []struct {
 		name string
 		in   string
 		want []string
 	}{
-		{"ルートは空", "/", nil},
-		{"空文字も空", "", nil},
-		{"単一要素", "/foo", []string{"foo"}},
-		{"複数要素", "/foo/bar/baz", []string{"foo", "bar", "baz"}},
-		{"先頭スラッシュ無し", "foo/bar", []string{"foo", "bar"}},
-		{"末尾スラッシュは無視", "/foo/bar/", []string{"foo", "bar"}},
-		{"連続スラッシュは無視", "/foo//bar", []string{"foo", "bar"}},
+		{"root is empty", "/", nil},
+		{"empty string is empty", "", nil},
+		{"single element", "/foo", []string{"foo"}},
+		{"multiple elements", "/foo/bar/baz", []string{"foo", "bar", "baz"}},
+		{"no leading slash", "foo/bar", []string{"foo", "bar"}},
+		{"trailing slash is ignored", "/foo/bar/", []string{"foo", "bar"}},
+		{"consecutive slashes are ignored", "/foo//bar", []string{"foo", "bar"}},
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
@@ -32,7 +32,7 @@ func Test_splitPath_変則的な区切りを正規化する(t *testing.T) {
 	}
 }
 
-func Test_joinPath_親パスに子名を連結する(t *testing.T) {
+func Test_joinPath_JoinsChildNameToParentPath(t *testing.T) {
 	tests := []struct {
 		parent string
 		name   string
@@ -50,7 +50,7 @@ func Test_joinPath_親パスに子名を連結する(t *testing.T) {
 	}
 }
 
-func Test_hasMeta_ワイルドカードを検出する(t *testing.T) {
+func Test_hasMeta_DetectsWildcards(t *testing.T) {
 	tests := []struct {
 		in   string
 		want bool
@@ -68,16 +68,16 @@ func Test_hasMeta_ワイルドカードを検出する(t *testing.T) {
 	}
 }
 
-func Test_escapeQueryValue_特殊文字をエスケープする(t *testing.T) {
+func Test_escapeQueryValue_EscapesSpecialCharacters(t *testing.T) {
 	tests := []struct {
 		name string
 		in   string
 		want string
 	}{
-		{"通常文字はそのまま", "report.pdf", "report.pdf"},
-		{"シングルクォートをエスケープ", "it's mine", `it\'s mine`},
-		{"バックスラッシュをエスケープ", `a\b`, `a\\b`},
-		{"両方含む", `a'\b`, `a\'\\b`},
+		{"ordinary characters are unchanged", "report.pdf", "report.pdf"},
+		{"single quote is escaped", "it's mine", `it\'s mine`},
+		{"backslash is escaped", `a\b`, `a\\b`},
+		{"both are escaped", `a'\b`, `a\'\\b`},
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
@@ -88,30 +88,30 @@ func Test_escapeQueryValue_特殊文字をエスケープする(t *testing.T) {
 	}
 }
 
-func Test_File_種別判定(t *testing.T) {
+func Test_File_KindDetection(t *testing.T) {
 	folder := File{MimeType: folderMIME}
 	if !folder.IsFolder() {
-		t.Error("フォルダMIMEがIsFolder()でtrueにならない")
+		t.Error("folder MIME does not return true from IsFolder()")
 	}
 	if folder.IsGoogleDoc() {
-		t.Error("フォルダがIsGoogleDoc()でtrueになっている")
+		t.Error("folder returns true from IsGoogleDoc()")
 	}
 
 	gdoc := File{MimeType: "application/vnd.google-apps.document"}
 	if gdoc.IsFolder() {
-		t.Error("Google DocがIsFolder()でtrueになっている")
+		t.Error("Google Doc returns true from IsFolder()")
 	}
 	if !gdoc.IsGoogleDoc() {
-		t.Error("Google DocがIsGoogleDoc()でtrueにならない")
+		t.Error("Google Doc does not return true from IsGoogleDoc()")
 	}
 
 	pdf := File{MimeType: "application/pdf"}
 	if pdf.IsFolder() || pdf.IsGoogleDoc() {
-		t.Error("通常ファイルが特殊種別と判定されている")
+		t.Error("ordinary file is classified as a special kind")
 	}
 }
 
-func Test_SplitParent_親パスと末尾名に分ける(t *testing.T) {
+func Test_SplitParent_SplitsIntoParentPathAndName(t *testing.T) {
 	tests := []struct {
 		in         string
 		wantParent string

@@ -2,21 +2,21 @@ package loc
 
 import "testing"
 
-func Test_Parse_drive記法とローカルを分類する(t *testing.T) {
+func Test_Parse_ClassifiesDriveNotationAndLocal(t *testing.T) {
 	tests := []struct {
 		name     string
 		arg      string
 		wantKind Kind
 		wantPath string
 	}{
-		{"drive: 絶対パス", "drive:/Documents/a.pdf", Drive, "/Documents/a.pdf"},
-		{"drive: 相対は絶対へ正規化", "drive:Documents/a.pdf", Drive, "/Documents/a.pdf"},
-		{"drive: ルート", "drive:/", Drive, "/"},
-		{"drive: 空はルート", "drive:", Drive, "/"},
-		{"drive: 末尾スラッシュは除去", "drive:/Documents/", Drive, "/Documents"},
-		{"ローカル相対", "./foo", Local, "./foo"},
-		{"ローカル絶対", "/tmp/bar", Local, "/tmp/bar"},
-		{"ローカル素の名前", "foo", Local, "foo"},
+		{"drive: absolute path", "drive:/Documents/a.pdf", Drive, "/Documents/a.pdf"},
+		{"drive: relative is normalized to absolute", "drive:Documents/a.pdf", Drive, "/Documents/a.pdf"},
+		{"drive: root", "drive:/", Drive, "/"},
+		{"drive: empty is root", "drive:", Drive, "/"},
+		{"drive: trailing slash is stripped", "drive:/Documents/", Drive, "/Documents"},
+		{"local relative", "./foo", Local, "./foo"},
+		{"local absolute", "/tmp/bar", Local, "/tmp/bar"},
+		{"local bare name", "foo", Local, "foo"},
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
@@ -29,7 +29,7 @@ func Test_Parse_drive記法とローカルを分類する(t *testing.T) {
 	}
 }
 
-func Test_ParseDriveDefault_無印もDrive扱い(t *testing.T) {
+func Test_ParseDriveDefault_TreatsUnprefixedAsDrive(t *testing.T) {
 	tests := []struct {
 		arg      string
 		wantPath string

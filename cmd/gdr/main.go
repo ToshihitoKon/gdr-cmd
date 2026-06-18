@@ -1,15 +1,15 @@
-// Command gdr は Google Drive を操作する CLI ツール。
+// Command gdr is a CLI tool for working with Google Drive.
 //
-// バイナリ名を go install / GoReleaser の両方で gdr に揃えるため、main は
-// この cmd/gdr ディレクトリに置く (go install はモジュールパス末尾ではなく
-// main パッケージのディレクトリ名をバイナリ名にするため)。
+// main lives in this cmd/gdr directory so the binary is named gdr under both
+// go install and GoReleaser (go install names the binary after the main
+// package's directory, not the trailing module path element).
 package main
 
 import (
 	"github.com/ToshihitoKon/gdr-cmd/cmd"
 )
 
-// ビルド時に GoReleaser の ldflags で注入される。開発ビルドでは既定値のまま。
+// Injected at build time via GoReleaser ldflags. Development builds keep the defaults.
 var (
 	version = "dev"
 	commit  = "none"

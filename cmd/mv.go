@@ -14,21 +14,22 @@ import (
 
 var mvCmd = &cobra.Command{
 	Use:   "mv drive:SOURCE... drive:DEST",
-	Short: "Drive 上でファイル/フォルダを移動・リネームする",
-	Long: `Drive 上でファイル/フォルダを移動・リネームします。SOURCE と DEST は
-どちらも drive: プレフィックスで指定します (Drive 内の操作のみ対応)。
+	Short: "Move or rename files/folders on Drive",
+	Long: `Move or rename files/folders on Drive. Both SOURCE and DEST must be
+specified with the drive: prefix (Drive-to-Drive operations only).
 
-DEST が既存のフォルダなら、その中へ移動します (名前は維持)。DEST が存在しない
-場合は、単一の SOURCE をその名前へリネーム (必要なら別フォルダへ移動) します。
-SOURCE が複数の場合、DEST は既存のフォルダでなければなりません。
+If DEST is an existing folder, sources are moved into it (names are kept). If
+DEST does not exist, a single SOURCE is renamed to that name (and moved to a
+different folder if needed). When there are multiple SOURCEs, DEST must be an
+existing folder.
 
-Drive ではメタデータの更新だけで移動するため、内容の再アップロードは発生しません。
-ローカルとの間で移したい場合は cp でコピーしてから rm してください。
+Drive moves only update metadata, so no content re-upload occurs. To move
+between local and Drive, use cp to copy and then rm.
 
-例:
-  gdr mv drive:/a.txt drive:/Documents/      # フォルダへ移動
-  gdr mv drive:/old.txt drive:/new.txt        # リネーム
-  gdr mv drive:/x.txt drive:/y.txt drive:/box/ # 複数をフォルダへ移動`,
+Examples:
+  gdr mv drive:/a.txt drive:/Documents/      # move into a folder
+  gdr mv drive:/old.txt drive:/new.txt        # rename
+  gdr mv drive:/x.txt drive:/y.txt drive:/box/ # move multiple into a folder`,
 	Args:              cobra.MinimumNArgs(2),
 	RunE:              runMv,
 	ValidArgsFunction: completeLocationArgs,
@@ -41,13 +42,13 @@ func init() {
 func runMv(cmd *cobra.Command, args []string) error {
 	ctx := cmd.Context()
 
-	// 全引数が Drive であることを要求する。
+	// Require every argument to be on Drive.
 	locs := make([]loc.Location, len(args))
 	for i, a := range args {
 		locs[i] = loc.Parse(a)
 		if !locs[i].IsDrive() {
-			return fmt.Errorf("mv は Drive 内の操作のみ対応します (drive: を付けてください): %s\n"+
-				"ローカルとの間で移すには cp でコピーしてから rm してください", a)
+			return fmt.Errorf("mv only supports Drive-to-Drive operations (add drive:): %s\n"+
+				"to move between local and Drive, use cp to copy and then rm", a)
 		}
 	}
 
@@ -59,7 +60,7 @@ func runMv(cmd *cobra.Command, args []string) error {
 	destPath := locs[len(locs)-1].Path
 	srcPaths := locs[:len(locs)-1]
 
-	// コピー元を解決して集める。
+	// Resolve and collect the sources.
 	var sources []drive.Node
 	for _, s := range srcPaths {
 		nodes, err := client.Resolve(ctx, s.Path)
@@ -67,31 +68,32 @@ func runMv(cmd *cobra.Command, args []string) error {
 			return err
 		}
 		if len(nodes) == 0 {
-			return fmt.Errorf("該当なし: %s", s)
+			return fmt.Errorf("no match: %s", s)
 		}
 		sources = append(sources, nodes...)
 	}
 
-	// DEST が既存フォルダかを調べる。
+	// Check whether DEST is an existing folder.
 	destFolderID, destIsFolder, err := resolveExistingFolder(ctx, client, destPath)
 	if err != nil {
 		return err
 	}
 
 	if len(sources) > 1 && !destIsFolder {
-		return fmt.Errorf("コピー元が複数あります。コピー先 %q は既存のフォルダである必要があります", destPath)
+		return fmt.Errorf("multiple sources given; destination %q must be an existing folder", destPath)
 	}
 
 	if destIsFolder {
 		return moveIntoFolder(ctx, client, sources, destFolderID, destPath)
 	}
-	// DEST 非存在 → 単一 SOURCE のリネーム/移動。
+	// DEST does not exist -> rename/move a single SOURCE.
 	return renameTo(ctx, client, sources[0], destPath)
 }
 
-// resolveExistingFolder は absPath が既存フォルダなら (ID, true, nil) を返す。
-// 存在しない/フォルダでない場合は ("", false, nil)。API 障害などの本当の
-// エラーは ("", false, err) で伝播し、単なる not-found と混同しない。
+// resolveExistingFolder returns (ID, true, nil) if absPath is an existing
+// folder, or ("", false, nil) if it does not exist or is not a folder. Real
+// errors (e.g. API failures) propagate as ("", false, err) so they are not
+// confused with a plain not-found.
 func resolveExistingFolder(ctx context.Context, client *drive.Client, absPath string) (string, bool, error) {
 	nodes, err := client.Resolve(ctx, absPath)
 	if err != nil {
@@ -108,14 +110,15 @@ func resolveExistingFolder(ctx context.Context, client *drive.Client, absPath st
 	return "", false, nil
 }
 
-// moveIntoFolder は sources を destFolderID 直下へ移動する (名前は維持)。
+// moveIntoFolder moves sources directly under destFolderID (names are kept).
 func moveIntoFolder(ctx context.Context, client *drive.Client, sources []drive.Node, destFolderID, destPath string) error {
 	var firstErr error
 	for _, src := range sources {
-		// 自分自身、または自分の子孫フォルダへの移動はループになるので弾く
-		// (Drive API も拒否するが、事前に分かりやすいエラーを出す)。
+		// Reject moving a folder into itself or one of its descendants, which
+		// would create a loop (the Drive API also rejects it, but we give a
+		// clearer error up front).
 		if src.File.ID == destFolderID || isSelfOrDescendant(src.Path, destPath) {
-			err := fmt.Errorf("自分自身または配下へは移動できません: %s -> %s", src.Path, destPath)
+			err := fmt.Errorf("cannot move into itself or a descendant: %s -> %s", src.Path, destPath)
 			fmt.Fprintln(os.Stderr, "mv:", err)
 			if firstErr == nil {
 				firstErr = err
@@ -129,17 +132,17 @@ func moveIntoFolder(ctx context.Context, client *drive.Client, sources []drive.N
 			}
 			continue
 		}
-		fmt.Fprintf(os.Stderr, "移動: drive:%s -> drive:%s/%s\n", src.Path, destPath, src.File.Name)
+		fmt.Fprintf(os.Stderr, "Moved: drive:%s -> drive:%s/%s\n", src.Path, destPath, src.File.Name)
 	}
 	return firstErr
 }
 
-// renameTo は src を destPath へリネームする。destPath の親が src と異なる
-// 場合は移動も伴う。
+// renameTo renames src to destPath. If destPath's parent differs from src's,
+// it also moves src.
 func renameTo(ctx context.Context, client *drive.Client, src drive.Node, destPath string) error {
 	destParentPath, destName := drive.SplitParent(destPath)
 	if destName == "" {
-		return fmt.Errorf("コピー先が不正です: %s", destPath)
+		return fmt.Errorf("invalid destination: %s", destPath)
 	}
 
 	destParentID, ok, err := resolveExistingFolder(ctx, client, destParentPath)
@@ -147,15 +150,15 @@ func renameTo(ctx context.Context, client *drive.Client, src drive.Node, destPat
 		return err
 	}
 	if !ok {
-		return fmt.Errorf("コピー先の親フォルダが見つかりません: %s", destParentPath)
+		return fmt.Errorf("destination parent folder not found: %s", destParentPath)
 	}
 
-	// フォルダを自分自身や配下へ移動するとループになるので弾く。
+	// Reject moving a folder into itself or a descendant, which would loop.
 	if isSelfOrDescendant(src.Path, destPath) {
-		return fmt.Errorf("自分自身または配下へは移動できません: %s -> %s", src.Path, destPath)
+		return fmt.Errorf("cannot move into itself or a descendant: %s -> %s", src.Path, destPath)
 	}
 
-	// 親の付け替えと名前変更を 1 回の更新で原子的に行う (中間状態を残さない)。
+	// Reparent and rename atomically in a single update (no intermediate state).
 	newParentID := ""
 	if destParentID != src.ParentID {
 		newParentID = destParentID
@@ -165,33 +168,34 @@ func renameTo(ctx context.Context, client *drive.Client, src drive.Node, destPat
 		newName = destName
 	}
 	if newParentID == "" && newName == "" {
-		// 同じ場所・同じ名前。何もしない。
-		fmt.Fprintf(os.Stderr, "移動: 変更なし: drive:%s\n", src.Path)
+		// Same location and same name; nothing to do.
+		fmt.Fprintf(os.Stderr, "Moved: no change: drive:%s\n", src.Path)
 		return nil
 	}
 
-	// コピー先に同名のファイル/フォルダが既にある場合、Drive は重複を許すが
-	// 黙って二重に作ると誤って上書きしたように見える。衝突として明示エラーにする
-	// (自分自身は除く)。
+	// If a file/folder with the same name already exists at the destination,
+	// Drive would allow a duplicate, but silently creating two looks like an
+	// accidental overwrite. Treat it as a collision and error out explicitly
+	// (excluding src itself).
 	siblings, err := client.ListChildrenByName(ctx, destParentID, destName)
 	if err != nil {
 		return err
 	}
 	for _, s := range siblings {
 		if s.ID != src.File.ID {
-			return fmt.Errorf("コピー先に同名が既に存在します (上書きは未対応): %s", destPath)
+			return fmt.Errorf("destination already has an entry with the same name (overwrite not supported): %s", destPath)
 		}
 	}
 
 	if err := client.MoveRename(ctx, src.File.ID, newParentID, src.ParentID, newName); err != nil {
 		return err
 	}
-	fmt.Fprintf(os.Stderr, "移動: drive:%s -> drive:%s\n", src.Path, destPath)
+	fmt.Fprintf(os.Stderr, "Moved: drive:%s -> drive:%s\n", src.Path, destPath)
 	return nil
 }
 
-// isSelfOrDescendant は target が src と同じか、src フォルダの配下かを返す。
-// フォルダを自分自身/子孫へ移動するループを防ぐために使う。
+// isSelfOrDescendant returns whether target equals src or is under the src
+// folder. Used to prevent loops when moving a folder into itself/a descendant.
 func isSelfOrDescendant(srcPath, target string) bool {
 	return target == srcPath || strings.HasPrefix(target, srcPath+"/")
 }

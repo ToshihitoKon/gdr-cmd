@@ -2,7 +2,7 @@ package auth
 
 import "testing"
 
-func Test_extractCode_URLからコードを抽出しstateを検証する(t *testing.T) {
+func Test_extractCode_ExtractsCodeFromURLAndVerifiesState(t *testing.T) {
 	const state = "expected-state"
 
 	tests := []struct {
@@ -12,42 +12,42 @@ func Test_extractCode_URLからコードを抽出しstateを検証する(t *test
 		wantErr  bool
 	}{
 		{
-			name:     "リダイレクトURLからcodeを抽出",
+			name:     "extract code from redirect URL",
 			input:    "http://127.0.0.1:9999/?state=expected-state&code=4/abc123&scope=drive",
 			wantCode: "4/abc123",
 		},
 		{
-			name:     "素の認可コードはそのまま使う",
+			name:     "bare authorization code is used as-is",
 			input:    "4/xyz789",
 			wantCode: "4/xyz789",
 		},
 		{
-			name:     "前後の空白を除去する",
+			name:     "surrounding whitespace is trimmed",
 			input:    "  4/trimmed  ",
 			wantCode: "4/trimmed",
 		},
 		{
-			name:    "stateが一致しないとエラー",
+			name:    "mismatched state is an error",
 			input:   "http://127.0.0.1:9999/?state=wrong&code=4/abc",
 			wantErr: true,
 		},
 		{
-			name:    "errorクエリがあるとエラー",
+			name:    "error query is an error",
 			input:   "http://127.0.0.1:9999/?error=access_denied",
 			wantErr: true,
 		},
 		{
-			name:    "codeが無いURLはエラー",
+			name:    "URL without code is an error",
 			input:   "http://127.0.0.1:9999/?state=expected-state",
 			wantErr: true,
 		},
 		{
-			name:    "空入力はエラー",
+			name:    "empty input is an error",
 			input:   "   ",
 			wantErr: true,
 		},
 		{
-			name:     "stateが無いURLでもcodeがあれば許容",
+			name:     "URL without state is allowed if code is present",
 			input:    "http://127.0.0.1:9999/?code=4/nostate",
 			wantCode: "4/nostate",
 		},
@@ -58,12 +58,12 @@ func Test_extractCode_URLからコードを抽出しstateを検証する(t *test
 			got, err := extractCode(tt.input, state)
 			if tt.wantErr {
 				if err == nil {
-					t.Errorf("エラーを期待したが nil (got code=%q)", got)
+					t.Errorf("expected an error but got nil (got code=%q)", got)
 				}
 				return
 			}
 			if err != nil {
-				t.Fatalf("予期しないエラー: %v", err)
+				t.Fatalf("unexpected error: %v", err)
 			}
 			if got != tt.wantCode {
 				t.Errorf("extractCode() = %q, want %q", got, tt.wantCode)

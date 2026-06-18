@@ -16,32 +16,32 @@ import (
 var (
 	lsLong     bool
 	lsHuman    bool
-	lsListDirs bool // -d: フォルダの中身ではなくフォルダ自身を表示
+	lsListDirs bool // -d: list folders themselves instead of their contents
 )
 
 var lsCmd = &cobra.Command{
 	Use:   "ls [PATH...]",
-	Short: "Drive 上のファイルを一覧表示する",
-	Long: `マイドライブ起点のパスにマッチするファイル/フォルダを一覧表示します。
+	Short: "List files on Drive",
+	Long: `List files/folders matching a My Drive-relative path.
 
-引数を省略するとルート直下を表示します。パスがフォルダを指す場合はその中身を、
-ファイルを指す場合はそのファイル自身を表示します (Unix の ls と同様)。
-パスにはワイルドカード (*, ?, [...]) を使えます。
+With no arguments, lists the contents of the root. If the path points to a
+folder, its contents are shown; if it points to a file, the file itself is
+shown (like Unix ls). Paths support wildcards (*, ?, [...]).
 
-例:
+Examples:
   gdr ls
   gdr ls /Documents
   gdr ls -l /Documents/*.pdf
-  gdr ls -d /Documents      # フォルダ自身を表示`,
+  gdr ls -d /Documents      # show the folder itself`,
 	RunE:              runLs,
 	ValidArgsFunction: completeDrivePath,
 }
 
 func init() {
-	lsCmd.Flags().BoolVarP(&lsLong, "long", "l", false, "詳細形式 (種別・サイズ・更新日時) で表示する")
-	// -h は cobra が --help のショートハンドに使うため、ここでは long フラグのみにする。
-	lsCmd.Flags().BoolVar(&lsHuman, "human-readable", false, "サイズを人間が読みやすい単位で表示する")
-	lsCmd.Flags().BoolVarP(&lsListDirs, "directory", "d", false, "フォルダの中身ではなくフォルダ自身を表示する")
+	lsCmd.Flags().BoolVarP(&lsLong, "long", "l", false, "use the long format (kind, size, modified time)")
+	// -h is reserved by cobra as the shorthand for --help, so this flag is long-only.
+	lsCmd.Flags().BoolVar(&lsHuman, "human-readable", false, "show sizes in human-readable units")
+	lsCmd.Flags().BoolVarP(&lsListDirs, "directory", "d", false, "list folders themselves instead of their contents")
 	rootCmd.AddCommand(lsCmd)
 }
 
@@ -52,18 +52,18 @@ func runLs(cmd *cobra.Command, args []string) error {
 		return err
 	}
 
-	// 引数なしはルートを対象にする。
+	// No arguments means target the root.
 	if len(args) == 0 {
 		args = []string{"/"}
 	}
 
-	// ls は引数を Drive パスとして扱う。drive: プレフィックス付きも受け付けるため
-	// 正規化して "/" 始まりのマイドライブ起点パスに揃える。
+	// ls treats arguments as Drive paths. It also accepts the drive: prefix, so
+	// normalize everything to a "/"-rooted My Drive-relative path.
 	for i, a := range args {
 		args[i] = loc.ParseDriveDefault(a).Path
 	}
 
-	// 複数パス指定時に見出しを付けるかどうか。
+	// Whether to print headings when multiple paths are given.
 	multiHeading := false
 	if !lsListDirs {
 		multiHeading = len(args) > 1 || hasFolderTarget(ctx, client, args)
@@ -85,7 +85,7 @@ func runLs(cmd *cobra.Command, args []string) error {
 			continue
 		}
 		if len(nodes) == 0 {
-			fmt.Fprintf(os.Stderr, "ls: 該当なし: %s\n", p)
+			fmt.Fprintf(os.Stderr, "ls: no match: %s\n", p)
 			continue
 		}
 
@@ -98,8 +98,8 @@ func runLs(cmd *cobra.Command, args []string) error {
 	return firstErr
 }
 
-// hasFolderTarget は引数のいずれかがフォルダに解決されるかを調べる
-// (見出し表示の要否判定用)。判定のための先読みなのでエラーは無視する。
+// hasFolderTarget reports whether any argument resolves to a folder (used to
+// decide whether headings are needed). This is a lookahead, so errors are ignored.
 func hasFolderTarget(ctx context.Context, client *drive.Client, args []string) bool {
 	for _, p := range args {
 		nodes, err := client.Resolve(ctx, p)
@@ -115,10 +115,10 @@ func hasFolderTarget(ctx context.Context, client *drive.Client, args []string) b
 	return false
 }
 
-// listNodes は解決済み Node 群を表示する。
-// フォルダはその中身を展開し (-d 指定時を除く)、ファイルはそのまま表示する。
+// listNodes prints the resolved nodes. Folders are expanded to their contents
+// (except when -d is given), and files are printed as-is.
 func listNodes(ctx context.Context, w *tabwriter.Writer, client *drive.Client, nodes []drive.Node, withHeading, leadingBlank bool) error {
-	// フォルダと非フォルダを分け、Unix ls と同様に非フォルダを先に出す。
+	// Separate folders from non-folders, and print non-folders first like Unix ls.
 	var files []drive.File
 	var folders []drive.Node
 	for _, n := range nodes {
@@ -129,7 +129,7 @@ func listNodes(ctx context.Context, w *tabwriter.Writer, client *drive.Client, n
 		}
 	}
 
-	// 直接指定された非フォルダ (とフォルダ自身表示) をまず出力。
+	// Print directly named non-folders (and folders themselves under -d) first.
 	if len(files) > 0 {
 		sortFiles(files)
 		for _, f := range files {
@@ -138,7 +138,7 @@ func listNodes(ctx context.Context, w *tabwriter.Writer, client *drive.Client, n
 		w.Flush()
 	}
 
-	// フォルダはその中身を展開表示する。
+	// Expand folders to show their contents.
 	for _, folder := range folders {
 		children, err := client.ListChildren(ctx, folder.File.ID)
 		if err != nil {
@@ -161,18 +161,18 @@ func listNodes(ctx context.Context, w *tabwriter.Writer, client *drive.Client, n
 	return nil
 }
 
-// sortFiles はフォルダを先に、その中で名前順に並べる。
+// sortFiles puts folders first, then sorts by name within each group.
 func sortFiles(files []drive.File) {
 	sort.SliceStable(files, func(i, j int) bool {
 		fi, fj := files[i], files[j]
 		if fi.IsFolder() != fj.IsFolder() {
-			return fi.IsFolder() // フォルダが先
+			return fi.IsFolder() // folders first
 		}
 		return fi.Name < fj.Name
 	})
 }
 
-// printFileLine は 1 ファイルを現在のフラグに従って出力する。
+// printFileLine prints one file according to the current flags.
 func printFileLine(w *tabwriter.Writer, f drive.File) {
 	name := f.Name
 	if f.IsFolder() {
@@ -189,7 +189,7 @@ func printFileLine(w *tabwriter.Writer, f drive.File) {
 	fmt.Fprintf(w, "%s\t%s\t%s\t%s\n", kind, size, modified, name)
 }
 
-// fileKind は種別ラベルを返す。
+// fileKind returns the kind label.
 func fileKind(f drive.File) string {
 	switch {
 	case f.IsFolder():
@@ -201,8 +201,8 @@ func fileKind(f drive.File) string {
 	}
 }
 
-// formatSize はサイズ列の表示文字列を返す。
-// フォルダや Google ネイティブ形式はサイズを持たないため "-" とする。
+// formatSize returns the display string for the size column. Folders and
+// Google-native formats have no size, so they are shown as "-".
 func formatSize(f drive.File) string {
 	if f.IsFolder() || f.IsGoogleDoc() {
 		return "-"
@@ -213,7 +213,7 @@ func formatSize(f drive.File) string {
 	return fmt.Sprintf("%d", f.Size)
 }
 
-// humanSize はバイト数を 1024 進の単位付き文字列にする。
+// humanSize formats a byte count as a base-1024 string with a unit suffix.
 func humanSize(n int64) string {
 	const unit = 1024
 	if n < unit {
@@ -227,11 +227,12 @@ func humanSize(n int64) string {
 	return fmt.Sprintf("%.1f%cB", float64(n)/float64(div), "KMGTPE"[exp])
 }
 
-// formatModTime は更新時刻を UNIX の ls -l 風に整える。
+// formatModTime formats the modified time in the style of Unix ls -l.
 //
-// ls の慣習に倣い、おおむね半年以内なら "月 日 時刻" (例 "Jun 18 14:30")、
-// それより古ければ "月 日  年" (例 "Sep 15  2021") を返す。日はスペース
-// パディング (_2) で桁を揃える。解析できない場合は元の文字列を返す。
+// Following ls conventions, it returns "month day time" (e.g. "Jun 18 14:30")
+// for times within roughly the last six months, and "month day  year"
+// (e.g. "Sep 15  2021") for older ones. The day is space-padded (_2) for
+// alignment. If the input cannot be parsed, the original string is returned.
 func formatModTime(s string) string {
 	if s == "" {
 		return "-"
@@ -241,7 +242,8 @@ func formatModTime(s string) string {
 		return s
 	}
 	t = t.Local()
-	// 6 ヶ月 = 約 182.5 日。未来の日時も古い扱いにならないよう絶対値で見る。
+	// Six months is about 182.5 days. Use the absolute value so future times
+	// are not treated as old.
 	const recent = 182*24*time.Hour + 12*time.Hour
 	if d := time.Since(t); d >= -recent && d <= recent {
 		return t.Format("Jan _2 15:04")

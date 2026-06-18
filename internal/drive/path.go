@@ -8,25 +8,25 @@ import (
 	"strings"
 )
 
-// ErrNotFound は Resolve でリテラルパスが存在しなかったことを表す。
-// errors.Is で判定し、API 障害などの本当のエラーと区別するために使う。
-var ErrNotFound = errors.New("パスが見つかりません")
+// ErrNotFound indicates that a literal path did not exist during Resolve.
+// It is checked with errors.Is to distinguish it from real errors such as API failures.
+var ErrNotFound = errors.New("path not found")
 
-// Node はパス解決の結果一つ分。Drive 上のファイルと、その絶対パスを持つ。
-// 同名ファイルや glob により一つのパス式が複数の Node に解決されうる。
+// Node is one result of path resolution. It holds a file on Drive and its absolute path.
+// A single path expression can resolve to multiple Nodes due to duplicate names or globs.
 type Node struct {
 	File File
-	// Path はマイドライブ起点の絶対パス ("/" 始まり)。
-	// glob 展開後は実体のファイル名で構成された具体パスになる。
+	// Path is the absolute path rooted at My Drive (starting with "/").
+	// After glob expansion, it becomes a concrete path made of actual file names.
 	Path string
-	// ParentID は親フォルダの ID。mv (親の付け替え) で旧親を指定するために使う。
-	// ルート自身の Node では空。
+	// ParentID is the ID of the parent folder. Used by mv (reparenting) to specify the old parent.
+	// Empty for the Node of the root itself.
 	ParentID string
 }
 
-// splitPath はマイドライブ起点のパスを要素列に分解する。
-// 先頭/末尾のスラッシュや空要素 ("//" など) は無視する。
-// ルート ("/" や "") は空スライスを返す。
+// splitPath splits a My Drive-rooted path into its components.
+// Leading/trailing slashes and empty components (such as "//") are ignored.
+// The root ("/" or "") returns an empty slice.
 func splitPath(p string) []string {
 	parts := strings.Split(p, "/")
 	out := make([]string, 0, len(parts))
@@ -39,16 +39,16 @@ func splitPath(p string) []string {
 	return out
 }
 
-// hasMeta はパス要素が glob メタ文字を含むかを返す。
+// hasMeta reports whether a path component contains glob meta characters.
 func hasMeta(component string) bool {
 	return strings.ContainsAny(component, "*?[")
 }
 
-// Resolve はマイドライブ起点のパス式を解決し、マッチした Node 群を返す。
+// Resolve resolves a My Drive-rooted path expression and returns the matched Nodes.
 //
-// パスにワイルドカードを含む場合は階層ごとに候補を展開する。マッチが
-// 一件も無ければ空スライスを返す (エラーにはしない)。リテラルパスで
-// 存在しない場合のみ NotFound 相当のエラーを返す。
+// If the path contains wildcards, candidates are expanded level by level. If
+// there is not a single match, an empty slice is returned (not an error). Only
+// when a literal path does not exist does it return a NotFound-equivalent error.
 func (c *Client) Resolve(ctx context.Context, p string) ([]Node, error) {
 	rootID, err := c.RootID(ctx)
 	if err != nil {
@@ -56,7 +56,7 @@ func (c *Client) Resolve(ctx context.Context, p string) ([]Node, error) {
 	}
 	components := splitPath(p)
 
-	// ルート自身を指す場合。
+	// The case where it points to the root itself.
 	root := Node{
 		File: File{ID: rootID, Name: "", MimeType: folderMIME},
 		Path: "/",
@@ -73,13 +73,13 @@ func (c *Client) Resolve(ctx context.Context, p string) ([]Node, error) {
 			return nil, err
 		}
 		if len(next) == 0 {
-			// glob を含む中間/末尾でマッチ無しは「結果ゼロ」。
-			// リテラルのみで構成され、かつ展開途中で消えた場合は not found。
+			// No match at an intermediate/last component containing a glob means "zero results".
+			// If it consists of literals only and disappeared during expansion, it is not found.
 			if hasMetaAnywhere(components) {
 				return nil, nil
 			}
-			// ErrNotFound でラップし、呼び出し側が「単に存在しない」ことを
-			// API 障害などの本当のエラーと区別できるようにする。
+			// Wrap with ErrNotFound so the caller can distinguish "simply does not exist"
+			// from real errors such as API failures.
 			return nil, fmt.Errorf("%w: %s", ErrNotFound, p)
 		}
 		current = next
@@ -87,17 +87,18 @@ func (c *Client) Resolve(ctx context.Context, p string) ([]Node, error) {
 	return current, nil
 }
 
-// expandComponent は現在の Node 群それぞれの直下から、comp にマッチする
-// 子要素を集めて次段の Node 群を作る。
+// expandComponent gathers the children directly under each of the current Nodes
+// that match comp, and builds the next level of Nodes.
 //
-// comp がメタ文字を含む場合は ListChildren して path.Match でフィルタし、
-// 含まない場合は ListChildrenByName で完全一致を引く (API 負荷が軽い)。
+// If comp contains meta characters, it lists the children with ListChildren and
+// filters them with path.Match; if not, it looks up an exact match with
+// ListChildrenByName (which is lighter on the API).
 func (c *Client) expandComponent(ctx context.Context, current []Node, comp string, isLast bool) ([]Node, error) {
 	var next []Node
 	literal := !hasMeta(comp)
 
 	for _, parent := range current {
-		// 親がフォルダでなければ、その配下は辿れない (リーフは展開対象外)。
+		// If the parent is not a folder, its contents cannot be traversed (leaves are not expanded).
 		if !parent.File.IsFolder() {
 			continue
 		}
@@ -117,7 +118,7 @@ func (c *Client) expandComponent(ctx context.Context, current []Node, comp strin
 			if !literal {
 				matched, merr := path.Match(comp, child.Name)
 				if merr != nil {
-					return nil, fmt.Errorf("不正なワイルドカードパターン %q: %w", comp, merr)
+					return nil, fmt.Errorf("invalid wildcard pattern %q: %w", comp, merr)
 				}
 				if !matched {
 					continue
@@ -133,7 +134,7 @@ func (c *Client) expandComponent(ctx context.Context, current []Node, comp strin
 	return next, nil
 }
 
-// joinPath はマイドライブ起点パスに子要素名を連結する。
+// joinPath appends a child component name to a My Drive-rooted path.
 func joinPath(parent, name string) string {
 	if parent == "/" {
 		return "/" + name
@@ -141,12 +142,13 @@ func joinPath(parent, name string) string {
 	return parent + "/" + name
 }
 
-// SplitParent はマイドライブ起点の絶対パスを (親フォルダの絶対パス, 末尾要素名)
-// に分ける。アップロード先やリネーム先の決定に使う。
+// SplitParent splits a My Drive-rooted absolute path into (the parent folder's
+// absolute path, the last component name). Used to decide the upload destination
+// or rename target.
 //
 //	"/a/b/c" -> ("/a/b", "c")
 //	"/a"     -> ("/",    "a")
-//	"/"      -> ("",     "")   (ルート自身に親は無い)
+//	"/"      -> ("",     "")   (the root itself has no parent)
 func SplitParent(absPath string) (parent, name string) {
 	comps := splitPath(absPath)
 	if len(comps) == 0 {
@@ -160,7 +162,7 @@ func SplitParent(absPath string) (parent, name string) {
 	return "/" + strings.Join(parentComps, "/"), name
 }
 
-// hasMetaAnywhere はパス要素のいずれかが glob メタ文字を含むかを返す。
+// hasMetaAnywhere reports whether any of the path components contains glob meta characters.
 func hasMetaAnywhere(components []string) bool {
 	for _, c := range components {
 		if hasMeta(c) {

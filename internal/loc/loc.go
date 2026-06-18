@@ -1,45 +1,47 @@
-// Package loc は CLI 引数のパス指定を Drive 側かローカル側かに分類する。
+// Package loc classifies a CLI path argument as either a Drive-side or a
+// local-side path.
 //
-// 記法:
-//   - "drive:/foo/bar" または "drive:foo/bar" は Drive 上のパス
-//   - それ以外 (例 "./foo", "/tmp/bar", "foo") はローカルパス
+// Notation:
+//   - "drive:/foo/bar" or "drive:foo/bar" is a path on Drive
+//   - anything else (e.g. "./foo", "/tmp/bar", "foo") is a local path
 //
-// sync や cp のように転送方向が引数で決まるコマンドで、両端がどちら側かを
-// 明示的に判別するために使う。drive: プレフィックスを付けないパスは常に
-// ローカル扱いとし、ローカルを明示したいときは "./foo" のように書ける。
+// This is used by commands like sync and cp, where the transfer direction is
+// determined by the arguments, to explicitly tell which side each end refers
+// to. A path without the drive: prefix is always treated as local; to make a
+// path explicitly local you can write it as "./foo".
 package loc
 
 import "strings"
 
-// drivePrefix は Drive 側を示すプレフィックス。
+// drivePrefix marks a path as being on the Drive side.
 const drivePrefix = "drive:"
 
-// Kind はパスが指す場所の種別。
+// Kind is the kind of location a path points to.
 type Kind int
 
 const (
-	// Local はローカルファイルシステム上のパス。
+	// Local is a path on the local file system.
 	Local Kind = iota
-	// Drive は Google Drive 上のパス。
+	// Drive is a path on Google Drive.
 	Drive
 )
 
-// Location は分類済みのパス指定。
+// Location is a classified path argument.
 type Location struct {
 	Kind Kind
-	// Path は種別ごとの「素の」パス。
-	//   - Drive の場合: マイドライブ起点の絶対パス ("/" 始まりに正規化済み)
-	//   - Local の場合: 入力のローカルパスそのまま
+	// Path is the "bare" path for each kind.
+	//   - Drive: an absolute path rooted at My Drive (normalized to start with "/")
+	//   - Local: the input local path as is
 	Path string
 }
 
-// IsDrive は Drive 上のパスかどうかを返す。
+// IsDrive reports whether the path is on Drive.
 func (l Location) IsDrive() bool { return l.Kind == Drive }
 
-// IsLocal はローカルパスかどうかを返す。
+// IsLocal reports whether the path is local.
 func (l Location) IsLocal() bool { return l.Kind == Local }
 
-// String は記法を復元した表示用文字列を返す (エラーメッセージ用)。
+// String returns a display string that restores the notation (for error messages).
 func (l Location) String() string {
 	if l.Kind == Drive {
 		return drivePrefix + l.Path
@@ -47,11 +49,12 @@ func (l Location) String() string {
 	return l.Path
 }
 
-// Parse は引数を Location に分類する。
+// Parse classifies an argument into a Location.
 //
-// "drive:" プレフィックスがあれば Drive とし、続くパスを "/" 始まりへ正規化する
-// ("drive:foo" も "drive:/foo" も同じ /foo を指す)。プレフィックスが無ければ
-// ローカルとして入力をそのまま保持する。
+// If it has the "drive:" prefix, it is treated as Drive and the following path
+// is normalized to start with "/" ("drive:foo" and "drive:/foo" both point to
+// the same /foo). Without the prefix, it is treated as local and the input is
+// kept as is.
 func Parse(arg string) Location {
 	if rest, ok := strings.CutPrefix(arg, drivePrefix); ok {
 		return Location{Kind: Drive, Path: normalizeDrivePath(rest)}
@@ -59,11 +62,12 @@ func Parse(arg string) Location {
 	return Location{Kind: Local, Path: arg}
 }
 
-// ParseDriveDefault はプレフィックスの無いパスを Drive 扱いにする。
+// ParseDriveDefault treats a path without the prefix as a Drive path.
 //
-// ls/cp など「引数は基本 Drive パス」という従来挙動を保つコマンド向け。
-// "drive:" 付きも受け付けるため、新記法と旧記法の両方を許容できる。
-// ローカルを明示したい場合は呼び出し側で Parse を使い分けること。
+// For commands like ls/cp that keep the legacy behavior of "arguments are Drive
+// paths by default". It also accepts the "drive:" prefix, so both the new and
+// old notations are allowed. To make a path explicitly local, the caller should
+// use Parse instead.
 func ParseDriveDefault(arg string) Location {
 	if rest, ok := strings.CutPrefix(arg, drivePrefix); ok {
 		return Location{Kind: Drive, Path: normalizeDrivePath(rest)}
@@ -71,16 +75,18 @@ func ParseDriveDefault(arg string) Location {
 	return Location{Kind: Drive, Path: normalizeDrivePath(arg)}
 }
 
-// HasTrailingSlash は元の引数が "/" で終わるか (ディレクトリ志向か) を返す。
-// "drive:" プレフィックスやローカルかを問わず、末尾スラッシュの有無だけを見る。
-// cp/sync で「コピー先をディレクトリとして扱うか」の判断に使う。
+// HasTrailingSlash reports whether the original argument ends with "/" (i.e. is
+// directory-oriented). It only looks at the presence of a trailing slash,
+// regardless of the "drive:" prefix or whether it is local. cp/sync use this to
+// decide whether to treat the destination as a directory.
 func HasTrailingSlash(arg string) bool {
 	s := strings.TrimPrefix(arg, drivePrefix)
 	return strings.HasSuffix(s, "/")
 }
 
-// normalizeDrivePath は Drive パスを "/" 始まりに正規化する。
-// 空や "." はルート "/" とみなす。末尾スラッシュは (ルートを除き) 取り除く。
+// normalizeDrivePath normalizes a Drive path to start with "/".
+// Empty or "." is treated as the root "/". A trailing slash is removed (except
+// for the root).
 func normalizeDrivePath(p string) string {
 	if p == "" || p == "." || p == "/" {
 		return "/"
@@ -88,7 +94,7 @@ func normalizeDrivePath(p string) string {
 	if !strings.HasPrefix(p, "/") {
 		p = "/" + p
 	}
-	// ルート以外の末尾スラッシュは解決時に不要なので落とす。
+	// A trailing slash other than the root is unnecessary for resolution, so drop it.
 	for len(p) > 1 && strings.HasSuffix(p, "/") {
 		p = p[:len(p)-1]
 	}

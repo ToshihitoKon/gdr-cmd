@@ -1,4 +1,4 @@
-// Package cmd は gdr CLI のコマンド定義を提供する。
+// Package cmd provides the command definitions for the gdr CLI.
 package cmd
 
 import (
@@ -8,32 +8,32 @@ import (
 	"github.com/spf13/cobra"
 )
 
-// rootCmd は gdr のルートコマンド。
+// rootCmd is the root command of gdr.
 var rootCmd = &cobra.Command{
 	Use:   "gdr",
-	Short: "Google Drive を操作する CLI ツール",
-	Long: `gdr は Google Drive をコマンドラインから操作するツールです。
+	Short: "CLI tool for working with Google Drive",
+	Long: `gdr is a tool for working with Google Drive from the command line.
 
-マイドライブ起点のパス (例: /dir/file.txt) でファイルを指定し、
-ls での一覧表示と cp でのダウンロードができます。パスにはワイルドカード
-(*, ?, [...]) を使え、Tab 補完にも対応します。
+Specify files by My Drive-relative paths (e.g. /dir/file.txt) to list them with
+ls and download them with cp. Paths support wildcards (*, ?, [...]) and Tab
+completion.
 
-認証はサービスアカウント鍵を使わず、OAuth でユーザーの Google アカウントに
-ログインします。初回は 'gdr auth login' を実行してください。`,
+Authentication does not use a service account key; instead it logs in to your
+Google account via OAuth. Run 'gdr auth login' the first time.`,
 	SilenceUsage:  true,
 	SilenceErrors: true,
 }
 
-// SetVersionInfo はビルド時に注入されたバージョン情報をルートコマンドへ設定する。
-// これにより `gdr --version` / `gdr version` で表示できる。
+// SetVersionInfo sets the build-time version info on the root command so it can
+// be shown via `gdr --version` / `gdr version`.
 func SetVersionInfo(version, commit, date string) {
 	rootCmd.Version = fmt.Sprintf("%s (commit %s, built %s)", version, commit, date)
 }
 
-// Execute はルートコマンドを実行する。main から呼ばれる。
+// Execute runs the root command. Called from main.
 func Execute() {
 	if err := rootCmd.Execute(); err != nil {
-		fmt.Fprintln(os.Stderr, "エラー:", err)
+		fmt.Fprintln(os.Stderr, "error:", err)
 		os.Exit(1)
 	}
 }
