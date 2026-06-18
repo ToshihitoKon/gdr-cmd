@@ -1,189 +1,256 @@
-# gdr-cmd
+<div align="center">
 
-Google Drive をコマンドラインから操作する CLI ツールです。マイドライブ起点の
-パスでファイルを指定し、`ls` での一覧表示と `cp` でのダウンロードができます。
-パスにはワイルドカード (`*`, `?`, `[...]`) を使え、Tab 補完にも対応します。
+# 🗂️ gdr-cmd
 
-認証はサービスアカウント鍵を手元に持たず、OAuth でユーザー自身の Google
-アカウントにログインする方式です。
+### ✨ A delightful CLI for your Google Drive — `ls` and `cp`, with wildcards and tab completion 🚀
 
-## 特徴
+<p>
+  <img alt="Go" src="https://img.shields.io/badge/Go-1.23%2B-00ADD8?logo=go&logoColor=white">
+  <img alt="Google Drive API" src="https://img.shields.io/badge/Google%20Drive-API%20v3-4285F4?logo=googledrive&logoColor=white">
+  <img alt="OAuth 2.0" src="https://img.shields.io/badge/Auth-OAuth%202.0-EB5424?logo=auth0&logoColor=white">
+  <img alt="License" src="https://img.shields.io/badge/License-MIT-yellow.svg">
+</p>
 
-- `ls`: Drive 上のファイル/フォルダを一覧表示 (詳細表示 `-l` 対応)
-- `cp`: Drive 上のファイルをローカルへダウンロード (フォルダ再帰 `-r` 対応)
-- ワイルドカード: パスの各階層で `*`, `?`, `[...]` が使える
-- Tab 補完: サブコマンド・フラグに加え、**Drive 上のパスを動的に補完**
-- 認証: ユーザー自身の OAuth クライアントを使い、サービスアカウント鍵を持たない
+<p>
+  <em>Browse and download your Drive from the comfort of your terminal —<br>
+  no service-account keys, just your own Google account. 🔐</em>
+</p>
 
-## インストール
+</div>
+
+---
+
+## 📑 Table of Contents
+
+- [🌟 Features](#-features)
+- [📦 Installation](#-installation)
+- [🔑 Setup: Create an OAuth Client](#-setup-create-an-oauth-client)
+- [🚪 Logging In](#-logging-in)
+- [📂 Usage](#-usage)
+- [⌨️ Tab Completion](#️-tab-completion)
+- [⚠️ Design Notes & Known Limitations](#️-design-notes--known-limitations)
+- [🛠️ Development](#️-development)
+
+---
+
+## 🌟 Features
+
+| | |
+|---|---|
+| 📋 **`ls`** | List files and folders in My Drive (detailed view with `-l`) |
+| ⬇️ **`cp`** | Download files from Drive to your local machine (recursive folders with `-r`) |
+| ✳️ **Wildcards** | Use `*`, `?`, `[...]` at every level of a path |
+| ⌨️ **Tab Completion** | Subcommands, flags, **and dynamic completion of Drive paths** |
+| 🔐 **No service-account keys** | Authenticate with **your own** OAuth client and Google account |
+
+---
+
+## 📦 Installation
 
 ```sh
 go install github.com/ToshihitoKon/gdr-cmd@latest
 ```
 
-ビルド済みバイナリは `gdr` という名前で生成されます。または、リポジトリを
-クローンして `go build -o gdr .` でビルドできます。
+The binary is named **`gdr`**. Alternatively, clone the repo and build it yourself:
 
-## 事前準備: OAuth クライアントの作成
+```sh
+git clone https://github.com/ToshihitoKon/gdr-cmd.git
+cd gdr-cmd
+go build -o gdr .
+```
 
-サービスアカウント鍵を使わない代わりに、自分の Google Cloud プロジェクトで
-OAuth クライアントを 1 度だけ作成します。
+---
 
-1. [Google Cloud Console](https://console.cloud.google.com/) でプロジェクトを作成
-   (既存のものでも可)。
-2. **API とサービス → ライブラリ** で「Google Drive API」を有効化する。
-3. **API とサービス → OAuth 同意画面** を設定する。
-   - User Type は社内利用なら「内部」、個人の Google アカウントなら「外部」を選ぶ。
-   - 「外部」かつ公開していない場合はテストユーザーに自分のアカウントを追加する。
-   - スコープに `.../auth/drive` (Google Drive の読み書き) を追加する。
-4. **API とサービス → 認証情報 → 認証情報を作成 → OAuth クライアント ID** で、
-   アプリケーションの種類に **デスクトップアプリ** を選んで作成する。
-5. 作成後、JSON をダウンロードする (`client_secret_xxx.json` のような名前)。
+## 🔑 Setup: Create an OAuth Client
 
-### 認証情報の設定
+Instead of using a service-account key, you create an OAuth client **once** in your own
+Google Cloud project. 🛠️
 
-ダウンロードした JSON を設定ディレクトリに配置するか、環境変数で渡します。
+1. **Create a project** in the [Google Cloud Console](https://console.cloud.google.com/)
+   (an existing one works too).
+2. Go to **APIs & Services → Library** and enable the **Google Drive API**.
+3. Configure the **OAuth consent screen** under **APIs & Services**.
+   - For internal company use, pick **Internal**; for a personal Google account, pick **External**.
+   - If **External** and unpublished, add your own account as a **test user**.
+   - Add the scope `.../auth/drive` (read & write to Google Drive).
+4. Go to **APIs & Services → Credentials → Create Credentials → OAuth client ID**,
+   choose **Desktop app**, and create it.
+5. **Download the JSON** (named something like `client_secret_xxx.json`).
 
-**方法 A: JSON を配置する (推奨)**
+### 📥 Provide the credentials
+
+Drop the JSON into the config directory, or pass it via environment variables.
+
+<details open>
+<summary><strong>Option A — Place the JSON file (recommended) ✅</strong></summary>
 
 ```sh
 mkdir -p ~/.config/gdr-cmd
 cp ~/Downloads/client_secret_xxx.json ~/.config/gdr-cmd/credentials.json
 ```
 
-**方法 B: 環境変数で渡す**
+</details>
+
+<details>
+<summary><strong>Option B — Use environment variables 🌱</strong></summary>
 
 ```sh
 export GDR_CLIENT_ID="xxxxx.apps.googleusercontent.com"
 export GDR_CLIENT_SECRET="xxxxx"
 ```
 
-環境変数が設定されている場合はそちらが優先されます。
+When set, environment variables take precedence over the JSON file.
 
-> 設定ディレクトリは `$XDG_CONFIG_HOME/gdr-cmd/` (未設定なら `~/.config/gdr-cmd/`)
-> です。認証情報とトークンを含むため、ディレクトリは `0700`、トークンファイルは
-> `0600` で保存されます。
+</details>
 
-## ログイン
+> 💡 The config directory is `$XDG_CONFIG_HOME/gdr-cmd/` (defaults to `~/.config/gdr-cmd/`).
+> Because it holds credentials and tokens, the directory is created with `0700` and the
+> token file with `0600`.
+
+---
+
+## 🚪 Logging In
 
 ```sh
 gdr auth login
 ```
 
-ブラウザが自動で開き、Google アカウントでの承認を求められます。承認すると
-ローカルの一時ポートで認可コードを受け取り、トークンを
-`~/.config/gdr-cmd/token.json` に保存します。以降は refresh token により自動で
-更新されるため、再ログインは不要です。
+Your browser opens and asks you to authorize with your Google account. Once approved,
+`gdr` receives the authorization code on a temporary local port and saves the token to
+`~/.config/gdr-cmd/token.json`. From then on the **refresh token** keeps it current — no
+need to log in again. 🎉
 
-SSH 越しなどブラウザをローカルで開けない環境では、手動コピペ方式を使います。
+🌐 **No local browser?** (e.g. over SSH) Use the manual copy-paste flow:
 
 ```sh
 gdr auth login --no-browser
 ```
 
-表示された URL を任意の端末のブラウザで開いて承認し、リダイレクト先
-(`http://127.0.0.1:9999/...`) の URL 全体をターミナルに貼り付けます。
-ブラウザは「127.0.0.1 に接続できない」と表示しますが、これは正常です
-(アドレスバーの URL に認可コードが含まれているため、それを使います)。
+Open the printed URL in a browser on any device, approve, and paste the **entire**
+redirect URL (`http://127.0.0.1:9999/...`) back into the terminal. The browser will show a
+"can't connect to 127.0.0.1" error — **that's expected** (the authorization code lives in
+the address bar, and that's what we read).
 
-その他の認証コマンド:
+Other auth commands:
 
 ```sh
-gdr auth status   # ログイン状態を確認
-gdr auth logout   # 保存済みトークンを削除
+gdr auth status   # 🔍 Check login state
+gdr auth logout   # 🚪 Remove the saved token
 ```
 
-> **認証フローについての補足**: Google は従来の OOB フロー
-> (`redirect_uri=urn:ietf:wg:oauth:2.0:oob`) を 2022 年に廃止しました。本ツールは
-> その後継である loopback リダイレクト (`http://127.0.0.1:<port>`) を使います。
-> `--no-browser` の手動コピペ方式も、この loopback URL からコードを読み取る形で
-> 同等の体験を実現しています。
+> 🧭 **A note on the auth flow:** Google **discontinued** the legacy OOB flow
+> (`redirect_uri=urn:ietf:wg:oauth:2.0:oob`) in 2022. `gdr` uses its successor — the
+> **loopback redirect** (`http://127.0.0.1:<port>`). The `--no-browser` mode delivers the
+> same experience by reading the code out of that loopback URL.
 
-## 使い方
+---
 
-### ls — 一覧表示
+## 📂 Usage
+
+### 📋 `ls` — List
 
 ```sh
-gdr ls                       # マイドライブのルート直下
-gdr ls /Documents            # フォルダの中身
-gdr ls -l /Documents         # 詳細表示 (種別・サイズ・更新日時)
-gdr ls -l --human-readable / # サイズを単位付きで表示
-gdr ls -d /Documents         # フォルダ自身を表示 (中身を展開しない)
-gdr ls '/Documents/*.pdf'    # ワイルドカード
+gdr ls                       # 🏠 Root of My Drive
+gdr ls /Documents            # 📁 Contents of a folder
+gdr ls -l /Documents         # 📊 Detailed view (kind / size / modified / name)
+gdr ls -l --human-readable / # 📏 Human-readable sizes
+gdr ls -d /Documents         # 🗃️  Show the folder itself (don't expand it)
+gdr ls '/Documents/*.pdf'    # ✳️ Wildcards
 ```
 
-詳細表示の列は `種別 / サイズ / 更新日時 / 名前` です。種別は `dir` (フォルダ)、
-`file` (通常ファイル)、`gdoc` (Google ネイティブ形式) を示します。
+The detailed view columns are `kind / size / modified / name`. **kind** is one of
+`dir` (folder), `file` (regular file), or `gdoc` (Google-native format).
 
-### cp — ダウンロード
+### ⬇️ `cp` — Download
 
 ```sh
-gdr cp /Documents/report.pdf .          # カレントディレクトリへ
-gdr cp /Documents/report.pdf ./out.pdf  # 名前を指定して保存
-gdr cp '/Documents/*.pdf' ./pdfs/       # 複数ファイルをディレクトリへ
-gdr cp -r /Documents/project ./backup/  # フォルダを再帰ダウンロード
+gdr cp /Documents/report.pdf .          # 📥 Into the current directory
+gdr cp /Documents/report.pdf ./out.pdf  # 🏷️  Save under a chosen name
+gdr cp '/Documents/*.pdf' ./pdfs/       # 🗂️  Multiple files into a directory
+gdr cp -r /Documents/project ./backup/  # 🔁 Download a folder recursively
 ```
 
-- コピー元が複数 (または glob で複数) にマッチする場合、コピー先は既存の
-  ディレクトリである必要があります。
-- 同じディレクトリ内で名前が衝突する場合は `name (1).ext` のように連番が付きます。
-- Google ネイティブ形式 (Google ドキュメント/スプレッドシート等) は通常の
-  ダウンロードができないため、現時点ではスキップして警告します。
+- If the **source** matches multiple items (e.g. via a glob), the **destination** must be
+  an existing directory.
+- On name collisions within the same directory, a counter is appended like `name (1).ext`.
+- 🚧 Google-native formats (Google Docs/Sheets/etc.) can't be downloaded normally and are
+  **skipped with a warning** for now.
 
-> パスにワイルドカードを含む場合、シェルがローカルのファイル名に展開しないよう
-> シングルクォートで囲んでください。
+> ⚠️ Quote paths containing wildcards (e.g. `'/Documents/*.pdf'`) so your shell doesn't
+> expand them against **local** filenames.
 
-## Tab 補完の設定
+---
 
-cobra が各シェル向けの補完スクリプトを生成します。Drive 上のパスは入力中に
-Drive API を呼び出して動的に補完されます (フォルダ候補には末尾 `/` が付きます)。
+## ⌨️ Tab Completion
 
-> 動的補完は補完のたびに Drive API へ問い合わせます。応答が遅い場合に
-> シェルが固まらないよう、補完時の API 呼び出しには 3 秒のタイムアウトを
-> 設けています。
+`cobra` generates completion scripts for each shell. Drive paths are completed
+**dynamically** by querying the Drive API as you type — folder candidates get a trailing
+`/`. ✨
 
-### bash
+> ⏱️ Dynamic completion hits the Drive API on each request. To keep your shell from
+> hanging on slow responses, completion calls time out after **3 seconds**.
+
+<details>
+<summary>🐚 <strong>bash</strong></summary>
 
 ```sh
-# 一時的に有効化
+# Enable for the current session
 source <(gdr completion bash)
 
-# 永続化 (Linux)
+# Persist (Linux)
 gdr completion bash | sudo tee /etc/bash_completion.d/gdr > /dev/null
 ```
 
-### zsh
+</details>
+
+<details>
+<summary>🦓 <strong>zsh</strong></summary>
 
 ```sh
-# 補完を初めて使う場合は compinit を有効化
+# If using completion for the first time, enable compinit
 echo "autoload -U compinit; compinit" >> ~/.zshrc
 
-# 補完スクリプトを fpath の通ったディレクトリに置く
+# Place the completion script somewhere on your fpath
 gdr completion zsh > "${fpath[1]}/_gdr"
 ```
 
-新しいシェルを開くと有効になります。
+Restart your shell to take effect.
 
-### fish
+</details>
+
+<details>
+<summary>🐟 <strong>fish</strong></summary>
 
 ```sh
 gdr completion fish > ~/.config/fish/completions/gdr.fish
 ```
 
-## 設計上の制約・既知の制限
+</details>
 
-- 対象は**マイドライブのみ**で、共有ドライブ (Shared Drives) は対象外です。
-- `cp` は**ダウンロード方向のみ** (Drive → ローカル) に対応しています。
-  OAuth スコープは将来のアップロード対応を見据えて読み書き可能な `drive` を
-  取得済みのため、アップロード機能は後方互換のまま追加できます。
-- Google ネイティブ形式のエクスポート (Docs → PDF など) は未対応です。
-- Drive は同名ファイルを許容するため、同名が複数ある場合は `ls` は全件表示し、
-  `cp` は全件をダウンロードして名前衝突時に連番を付けます。
+---
 
-## 開発
+## ⚠️ Design Notes & Known Limitations
+
+- 🏠 Scoped to **My Drive only** — Shared Drives are not supported.
+- ⬇️ `cp` supports **download only** (Drive → local). The OAuth scope is already the
+  read-write `drive` scope (with future uploads in mind), so upload support can be added
+  without re-authentication.
+- 📄 Exporting Google-native formats (Docs → PDF, etc.) is **not yet supported**.
+- 👯 Drive allows **duplicate names**. When several items share a name, `ls` lists them
+  all, and `cp` downloads them all, appending a counter on collision.
+
+---
+
+## 🛠️ Development
 
 ```sh
-go build ./...   # ビルド
-go test ./...    # テスト
-go vet ./...     # 静的解析
+go build ./...   # 🔨 Build
+go test ./...    # 🧪 Test
+go vet ./...     # 🔎 Static analysis
 ```
+
+---
+
+<div align="center">
+<sub>Built with 🐹 Go and a little ✨ AI assistance.</sub>
+</div>
