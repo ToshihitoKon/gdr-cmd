@@ -2,17 +2,17 @@
 
 # 🗂️ gdr-cmd
 
-### ✨ A delightful CLI for your Google Drive — `ls` and `cp`, with wildcards and tab completion 🚀
+### ✨ A delightful CLI for your Google Drive — `ls`, `cp`, `sync`, `mkdir`, `rm`, `mv`, with wildcards and tab completion 🚀
 
 <p>
-  <img alt="Go" src="https://img.shields.io/badge/Go-1.23%2B-00ADD8?logo=go&logoColor=white">
+  <img alt="Go" src="https://img.shields.io/badge/Go-1.26%2B-00ADD8?logo=go&logoColor=white">
   <img alt="Google Drive API" src="https://img.shields.io/badge/Google%20Drive-API%20v3-4285F4?logo=googledrive&logoColor=white">
   <img alt="OAuth 2.0" src="https://img.shields.io/badge/Auth-OAuth%202.0-EB5424?logo=auth0&logoColor=white">
   <img alt="License" src="https://img.shields.io/badge/License-MIT-yellow.svg">
 </p>
 
 <p>
-  <em>Browse and download your Drive from the comfort of your terminal —<br>
+  <em>Browse, transfer, and manage your Drive from the comfort of your terminal —<br>
   no service-account keys, just your own Google account. 🔐</em>
 </p>
 
@@ -217,12 +217,18 @@ gdr sync ./site drive:/backup/site        # ⬆️  Local → Drive
 gdr sync drive:/Photos ./photos           # ⬇️  Drive → Local
 gdr sync --delete ./site drive:/backup    # 🧹 Remove extras at the destination
 gdr sync --dry-run ./site drive:/backup   # 👀 Preview without transferring
+gdr sync --checksum ./site drive:/backup  # 🔬 Also compare MD5 for same-size files
 ```
 
 Files are compared by **size and modification time**: same size and a destination that is
 as new or newer is skipped; otherwise the file is transferred. `--delete` removes files that
 exist only at the destination (moved to trash on the Drive side). Google-native formats are
-skipped.
+skipped (and never deleted by `--delete`).
+
+- 🔬 `--checksum` additionally compares the **MD5** of same-size files, so content changes
+  that don't change the size are still transferred (slower, but exact).
+- ⚠️ If an entry exists on both sides but one is a file and the other a folder, that path
+  (and its subtree) is **skipped** rather than overwritten.
 
 ### 📁 `mkdir` — Create folders
 
@@ -245,9 +251,15 @@ Deletion moves items to the Drive trash by default. Folders need `-r`.
 ### ✂️ `mv` — Move & rename (within Drive)
 
 ```sh
-gdr mv drive:/a.txt drive:/Documents/    # 📁 Move into a folder
-gdr mv drive:/old.txt drive:/new.txt     # 🏷️  Rename
+gdr mv drive:/a.txt drive:/Documents/        # 📁 Move into a folder (keeps the name)
+gdr mv drive:/old.txt drive:/new.txt          # 🏷️  Rename (move too, if the parent differs)
+gdr mv drive:/x.txt drive:/y.txt drive:/box/  # 🗂️  Move multiple items into a folder
 ```
+
+If `DEST` is an existing folder, sources are moved into it. If `DEST` doesn't exist, a single
+source is renamed to that name. Multiple sources require `DEST` to be an existing folder.
+Moving a folder into itself or a descendant is rejected, and a name collision at the
+destination is reported rather than silently duplicating.
 
 Moves are metadata-only on Drive, so no re-upload happens. To move between Drive and local,
 `cp` then `rm`.
@@ -313,6 +325,10 @@ gdr completion fish > ~/.config/fish/completions/gdr.fish
   modification time, not by content hash.
 - 👯 Drive allows **duplicate names**. When several items share a name, `ls` lists them all,
   and `cp` downloads them all, appending a counter on collision.
+- 🗑️ `rm` and `sync --delete` move items to the **trash by default** (recoverable); `rm
+  --permanent` skips the trash and deletes irreversibly.
+- 🔐 Authentication requests the read-write `drive` scope, since uploads, deletes, and moves
+  need write access.
 
 ---
 
@@ -322,7 +338,12 @@ gdr completion fish > ~/.config/fish/completions/gdr.fish
 go build ./...   # 🔨 Build
 go test ./...    # 🧪 Test
 go vet ./...     # 🔎 Static analysis
+gofmt -l .       # 🎨 Formatting check
 ```
+
+Pure, API-independent logic (path splitting, glob matching, authorization-code extraction,
+size and modified-time formatting) is covered by unit tests. The parts that hit the Drive
+API require real authentication and are verified manually.
 
 ---
 
