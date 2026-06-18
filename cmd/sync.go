@@ -149,6 +149,13 @@ func syncLocalToDrive(ctx context.Context, localRoot, driveRoot string) error {
 			continue
 		}
 
+		// 宛先が Google ネイティブ形式の場合、内容を octet-stream で上書きすると
+		// 文書を破壊するため転送しない (ダウンロード方向と同じく対象外扱い)。
+		if exists && de.isGoogleDoc {
+			fmt.Fprintf(os.Stderr, "sync: スキップ (Google ネイティブ形式は上書きできません): drive:%s\n", path.Join(driveRoot, rel))
+			continue
+		}
+
 		if !needsTransfer(se.size, se.modTime, exists, de.size, de.modTime) {
 			continue
 		}
@@ -222,6 +229,12 @@ func deleteExtraOnDrive(ctx context.Context, client *drive.Client, srcTree, dstT
 		}
 		de := dstTree[rel]
 		full := path.Join(driveRoot, rel)
+		// Google ネイティブ形式は同期対象外なので、--delete でも削除しない
+		// (転送経路で扱えないものを削除だけするのは一貫しない)。
+		if de.isGoogleDoc {
+			fmt.Fprintf(os.Stderr, "sync: 削除スキップ (Google ネイティブ形式は対象外): drive:%s\n", full)
+			continue
+		}
 		if syncDryRun {
 			fmt.Fprintf(os.Stderr, "[dry-run] delete drive:%s\n", full)
 			continue
