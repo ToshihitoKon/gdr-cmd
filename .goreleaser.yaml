@@ -1,0 +1,61 @@
+# GoReleaser 設定 (スキーマ version 2)。
+# v* タグを push すると GitHub Actions がこの設定で GitHub Releases を作る。
+# 手元で試す場合: goreleaser release --snapshot --clean
+version: 2
+
+before:
+  hooks:
+    - go mod tidy
+
+builds:
+  - id: gdr
+    main: .
+    binary: gdr
+    env:
+      - CGO_ENABLED=0
+    goos:
+      - darwin
+      - linux
+      - windows
+    goarch:
+      - amd64
+      - arm64
+    # Windows の arm64 はビルド対象外 (需要が薄いため)。
+    ignore:
+      - goos: windows
+        goarch: arm64
+    # GoReleaser の既定変数を main パッケージへ注入する。
+    ldflags:
+      - -s -w
+      - -X main.version={{.Version}}
+      - -X main.commit={{.Commit}}
+      - -X main.date={{.Date}}
+
+archives:
+  - id: gdr
+    # Unix 系は tar.gz、Windows のみ zip にする。
+    formats:
+      - tar.gz
+    format_overrides:
+      - goos: windows
+        formats:
+          - zip
+    name_template: >-
+      {{ .ProjectName }}_{{ .Version }}_{{ .Os }}_{{ .Arch }}
+
+checksum:
+  name_template: checksums.txt
+
+changelog:
+  sort: asc
+  filters:
+    # リリースノートのノイズになるコミットを除外する。
+    exclude:
+      - "^docs:"
+      - "^test:"
+      - "^chore:"
+      - "^ci:"
+
+release:
+  # 不安定タグ (例 v1.0.0-rc1) は自動でプレリリース扱いにする。
+  prerelease: auto

@@ -1,0 +1,29 @@
+name: release
+
+# v* タグ (例 v1.0.0) を push したときに GoReleaser でリリースを作る。
+on:
+  push:
+    tags:
+      - "v*"
+
+permissions:
+  contents: write # リリースとアセットの作成に必要。
+
+jobs:
+  goreleaser:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0 # changelog 生成のため全履歴を取得する。
+
+      - uses: actions/setup-go@v5
+        with:
+          go-version-file: go.mod # go.mod の go ディレクティブに追従する。
+
+      - uses: goreleaser/goreleaser-action@v6
+        with:
+          version: "~> v2"
+          args: release --clean
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}

@@ -2,6 +2,9 @@
 /gdr
 *.exe
 
+# GoReleaser の出力
+/dist/
+
 # テスト・カバレッジ
 *.out
 *.test

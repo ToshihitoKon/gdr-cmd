@@ -47,6 +47,12 @@
 
 ## 📦 Installation
 
+**⬇️ Download a prebuilt binary** for macOS / Linux / Windows from the
+[Releases](https://github.com/ToshihitoKon/gdr-cmd/releases) page, extract it, and put
+`gdr` somewhere on your `PATH`.
+
+**🐹 Or install with Go:**
+
 ```sh
 go install github.com/ToshihitoKon/gdr-cmd@latest
 ```
