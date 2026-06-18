@@ -70,27 +70,35 @@ func (c *Client) Mkdir(ctx context.Context, parentID, name string) (File, error)
 // EnsureFolderPath はマイドライブ起点の絶対パスのフォルダ階層を、無い段を
 // 作りながら解決し、末端フォルダの ID を返す (mkdir -p 相当)。
 //
-// 各階層で同名フォルダが既にあればそれを再利用する。同名でフォルダとファイルが
-// 混在する場合はフォルダを優先する。
+// 各階層で同名フォルダが既にあればそれを再利用する。同名のフォルダは無いが
+// 同名の「ファイル」が存在する場合は、ファイルの横に紛らわしいフォルダを黙って
+// 作らず、エラーを返す (呼び出し側で衝突として扱えるようにする)。
 func (c *Client) EnsureFolderPath(ctx context.Context, absPath string) (string, error) {
 	rootID, err := c.RootID(ctx)
 	if err != nil {
 		return "", err
 	}
 	parentID := rootID
+	resolved := "" // ここまで辿った絶対パス (エラーメッセージ用)
 	for _, name := range splitPath(absPath) {
+		resolved = joinPath(resolved, name)
 		children, err := c.ListChildrenByName(ctx, parentID, name)
 		if err != nil {
 			return "", err
 		}
 		var folderID string
+		fileExists := false
 		for _, ch := range children {
 			if ch.IsFolder() {
 				folderID = ch.ID
 				break
 			}
+			fileExists = true
 		}
 		if folderID == "" {
+			if fileExists {
+				return "", fmt.Errorf("同名のファイルが既に存在するためフォルダを作成できません: %s", resolved)
+			}
 			created, err := c.Mkdir(ctx, parentID, name)
 			if err != nil {
 				return "", err
