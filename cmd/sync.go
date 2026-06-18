@@ -373,7 +373,11 @@ func downloadForSync(ctx context.Context, client *drive.Client, se entry, localP
 		out.Close()
 		return fmt.Errorf("%s の書き込みに失敗しました: %w", localPath, err)
 	}
-	out.Close()
+	// 書き込みエラーは Close 時にのみ表面化することがある (例: ENOSPC) ため、
+	// Close の戻り値も必ず確認する。切り詰められたファイルを成功扱いにしない。
+	if err := out.Close(); err != nil {
+		return fmt.Errorf("%s のクローズに失敗しました: %w", localPath, err)
+	}
 
 	if !se.modTime.IsZero() {
 		// アクセス時刻は変更時刻に合わせる (atime を別管理しないため)。

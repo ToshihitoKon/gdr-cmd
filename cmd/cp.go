@@ -189,10 +189,15 @@ func downloadFile(ctx context.Context, client *drive.Client, f drive.File, outPa
 	if err != nil {
 		return fmt.Errorf("出力ファイルの作成に失敗しました (%s): %w", outPath, err)
 	}
-	defer out.Close()
 
 	if _, err := io.Copy(out, body); err != nil {
+		out.Close()
 		return fmt.Errorf("%s の書き込みに失敗しました: %w", outPath, err)
+	}
+	// 書き込みエラーは Close 時にのみ表面化することがある (例: ENOSPC) ため、
+	// Close の戻り値も確認して切り詰めを成功扱いにしない。
+	if err := out.Close(); err != nil {
+		return fmt.Errorf("%s のクローズに失敗しました: %w", outPath, err)
 	}
 	fmt.Fprintf(os.Stderr, "ダウンロード: %s -> %s\n", f.Name, outPath)
 	return nil
