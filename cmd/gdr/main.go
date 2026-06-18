@@ -1,4 +1,8 @@
 // Command gdr は Google Drive を操作する CLI ツール。
+//
+// バイナリ名を go install / GoReleaser の両方で gdr に揃えるため、main は
+// この cmd/gdr ディレクトリに置く (go install はモジュールパス末尾ではなく
+// main パッケージのディレクトリ名をバイナリ名にするため)。
 package main
 
 import (

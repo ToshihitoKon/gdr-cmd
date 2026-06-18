@@ -54,7 +54,7 @@
 **🐹 Or install with Go:**
 
 ```sh
-go install github.com/ToshihitoKon/gdr-cmd@latest
+go install github.com/ToshihitoKon/gdr-cmd/cmd/gdr@latest
 ```
 
 The binary is named **`gdr`**. Alternatively, clone the repo and build it yourself:
@@ -62,7 +62,7 @@ The binary is named **`gdr`**. Alternatively, clone the repo and build it yourse
 ```sh
 git clone https://github.com/ToshihitoKon/gdr-cmd.git
 cd gdr-cmd
-go build -o gdr .
+go build -o gdr ./cmd/gdr
 ```
 
 ---

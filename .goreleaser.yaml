@@ -9,7 +9,7 @@ before:
 
 builds:
   - id: gdr
-    main: .
+    main: ./cmd/gdr
     binary: gdr
     env:
       - CGO_ENABLED=0
