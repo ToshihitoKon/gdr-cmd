@@ -278,18 +278,18 @@ func uploadPath(ctx context.Context, client *drive.Client, localPath, parentID, 
 		if !cpRecursive {
 			return fmt.Errorf("%s はディレクトリです (-r を指定してください)", localPath)
 		}
-		// parentID 直下に同名フォルダを作って再帰アップロードする。
-		sub, err := client.Mkdir(ctx, parentID, info.Name())
+		// parentID 直下に同名フォルダを確保 (既存なら再利用) して再帰アップロードする。
+		subDrivePath := path.Join(destDrivePath, info.Name())
+		subID, err := client.EnsureChildFolder(ctx, parentID, info.Name(), subDrivePath)
 		if err != nil {
 			return err
 		}
-		subDrivePath := path.Join(destDrivePath, info.Name())
 		entries, err := os.ReadDir(localPath)
 		if err != nil {
 			return fmt.Errorf("ディレクトリの読み取りに失敗しました (%s): %w", localPath, err)
 		}
 		for _, e := range entries {
-			if err := uploadPath(ctx, client, filepath.Join(localPath, e.Name()), sub.ID, subDrivePath); err != nil {
+			if err := uploadPath(ctx, client, filepath.Join(localPath, e.Name()), subID, subDrivePath); err != nil {
 				return err
 			}
 		}

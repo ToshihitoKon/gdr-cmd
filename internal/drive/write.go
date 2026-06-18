@@ -67,12 +67,40 @@ func (c *Client) Mkdir(ctx context.Context, parentID, name string) (File, error)
 	return toFile(created), nil
 }
 
-// EnsureFolderPath はマイドライブ起点の絶対パスのフォルダ階層を、無い段を
-// 作りながら解決し、末端フォルダの ID を返す (mkdir -p 相当)。
+// EnsureChildFolder は parentID 直下に name のフォルダを確保し、その ID を返す。
 //
-// 各階層で同名フォルダが既にあればそれを再利用する。同名のフォルダは無いが
-// 同名の「ファイル」が存在する場合は、ファイルの横に紛らわしいフォルダを黙って
-// 作らず、エラーを返す (呼び出し側で衝突として扱えるようにする)。
+// 同名フォルダが既にあればそれを再利用する。同名のフォルダは無いが同名の「ファイル」
+// が存在する場合は、ファイルの横に紛らわしいフォルダを黙って作らずエラーを返す。
+// displayPath はエラーメッセージ用の表示パス (空でも可)。
+func (c *Client) EnsureChildFolder(ctx context.Context, parentID, name, displayPath string) (string, error) {
+	children, err := c.ListChildrenByName(ctx, parentID, name)
+	if err != nil {
+		return "", err
+	}
+	fileExists := false
+	for _, ch := range children {
+		if ch.IsFolder() {
+			return ch.ID, nil
+		}
+		fileExists = true
+	}
+	if fileExists {
+		where := displayPath
+		if where == "" {
+			where = name
+		}
+		return "", fmt.Errorf("同名のファイルが既に存在するためフォルダを作成できません: %s", where)
+	}
+	created, err := c.Mkdir(ctx, parentID, name)
+	if err != nil {
+		return "", err
+	}
+	return created.ID, nil
+}
+
+// EnsureFolderPath はマイドライブ起点の絶対パスのフォルダ階層を、無い段を
+// 作りながら解決し、末端フォルダの ID を返す (mkdir -p 相当)。各階層は
+// EnsureChildFolder で確保するため、同名ファイル衝突時はエラーになる。
 func (c *Client) EnsureFolderPath(ctx context.Context, absPath string) (string, error) {
 	rootID, err := c.RootID(ctx)
 	if err != nil {
@@ -82,30 +110,10 @@ func (c *Client) EnsureFolderPath(ctx context.Context, absPath string) (string, 
 	resolved := "" // ここまで辿った絶対パス (エラーメッセージ用)
 	for _, name := range splitPath(absPath) {
 		resolved = joinPath(resolved, name)
-		children, err := c.ListChildrenByName(ctx, parentID, name)
+		parentID, err = c.EnsureChildFolder(ctx, parentID, name, resolved)
 		if err != nil {
 			return "", err
 		}
-		var folderID string
-		fileExists := false
-		for _, ch := range children {
-			if ch.IsFolder() {
-				folderID = ch.ID
-				break
-			}
-			fileExists = true
-		}
-		if folderID == "" {
-			if fileExists {
-				return "", fmt.Errorf("同名のファイルが既に存在するためフォルダを作成できません: %s", resolved)
-			}
-			created, err := c.Mkdir(ctx, parentID, name)
-			if err != nil {
-				return "", err
-			}
-			folderID = created.ID
-		}
-		parentID = folderID
 	}
 	return parentID, nil
 }
