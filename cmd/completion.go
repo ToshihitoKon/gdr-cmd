@@ -72,6 +72,33 @@ func completeDrivePath(cmd *cobra.Command, args []string, toComplete string) ([]
 	return candidates, directive
 }
 
+// completeLocationArgs は cobra の ValidArgsFunction シグネチャに合わせた
+// completeLocationArg のラッパー。引数位置によらず同じ補完規則を適用する。
+func completeLocationArgs(cmd *cobra.Command, args []string, toComplete string) ([]string, cobra.ShellCompDirective) {
+	return completeLocationArg(cmd, toComplete)
+}
+
+// completeLocationArg は drive: 記法に対応した引数補完を行う。
+//
+// 入力が "drive:" で始まれば Drive パスを動的補完し、候補にも "drive:" を
+// 付け直す。それ以外はローカルとみなし、シェルの既定ファイル補完に委ねる。
+// cp/sync/mkdir/rm/mv のように両端を取りうるコマンドで使う。
+func completeLocationArg(cmd *cobra.Command, toComplete string) ([]string, cobra.ShellCompDirective) {
+	const prefix = "drive:"
+	if !strings.HasPrefix(toComplete, prefix) {
+		// ローカルパス: シェルにファイル補完させる。
+		return nil, cobra.ShellCompDirectiveDefault
+	}
+	drivePart := strings.TrimPrefix(toComplete, prefix)
+	candidates, directive := completeDrivePath(cmd, nil, drivePart)
+	// 候補に drive: を付け直す。
+	prefixed := make([]string, len(candidates))
+	for i, c := range candidates {
+		prefixed[i] = prefix + c
+	}
+	return prefixed, directive
+}
+
 // splitParentPrefix は補完入力を (親パス, 末尾要素の接頭辞) に分ける。
 //
 //	"/dir/fi" -> ("/dir", "fi")

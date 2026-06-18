@@ -110,3 +110,23 @@ func Test_File_種別判定(t *testing.T) {
 		t.Error("通常ファイルが特殊種別と判定されている")
 	}
 }
+
+func Test_SplitParent_親パスと末尾名に分ける(t *testing.T) {
+	tests := []struct {
+		in         string
+		wantParent string
+		wantName   string
+	}{
+		{"/a/b/c", "/a/b", "c"},
+		{"/a", "/", "a"},
+		{"/", "", ""},
+		{"/Documents/report.pdf", "/Documents", "report.pdf"},
+	}
+	for _, tt := range tests {
+		parent, name := SplitParent(tt.in)
+		if parent != tt.wantParent || name != tt.wantName {
+			t.Errorf("SplitParent(%q) = (%q, %q), want (%q, %q)",
+				tt.in, parent, name, tt.wantParent, tt.wantName)
+		}
+	}
+}

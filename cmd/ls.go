@@ -9,6 +9,7 @@ import (
 	"time"
 
 	"github.com/ToshihitoKon/gdr-cmd/internal/drive"
+	"github.com/ToshihitoKon/gdr-cmd/internal/loc"
 	"github.com/spf13/cobra"
 )
 
@@ -54,6 +55,12 @@ func runLs(cmd *cobra.Command, args []string) error {
 	// 引数なしはルートを対象にする。
 	if len(args) == 0 {
 		args = []string{"/"}
+	}
+
+	// ls は引数を Drive パスとして扱う。drive: プレフィックス付きも受け付けるため
+	// 正規化して "/" 始まりのマイドライブ起点パスに揃える。
+	for i, a := range args {
+		args[i] = loc.ParseDriveDefault(a).Path
 	}
 
 	// 複数パス指定時に見出しを付けるかどうか。
