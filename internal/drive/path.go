@@ -14,6 +14,9 @@ type Node struct {
 	// Path はマイドライブ起点の絶対パス ("/" 始まり)。
 	// glob 展開後は実体のファイル名で構成された具体パスになる。
 	Path string
+	// ParentID は親フォルダの ID。mv (親の付け替え) で旧親を指定するために使う。
+	// ルート自身の Node では空。
+	ParentID string
 }
 
 // splitPath はマイドライブ起点のパスを要素列に分解する。
@@ -114,8 +117,9 @@ func (c *Client) expandComponent(ctx context.Context, current []Node, comp strin
 				}
 			}
 			next = append(next, Node{
-				File: child,
-				Path: joinPath(parent.Path, child.Name),
+				File:     child,
+				Path:     joinPath(parent.Path, child.Name),
+				ParentID: parent.File.ID,
 			})
 		}
 	}
@@ -128,6 +132,25 @@ func joinPath(parent, name string) string {
 		return "/" + name
 	}
 	return parent + "/" + name
+}
+
+// SplitParent はマイドライブ起点の絶対パスを (親フォルダの絶対パス, 末尾要素名)
+// に分ける。アップロード先やリネーム先の決定に使う。
+//
+//	"/a/b/c" -> ("/a/b", "c")
+//	"/a"     -> ("/",    "a")
+//	"/"      -> ("",     "")   (ルート自身に親は無い)
+func SplitParent(absPath string) (parent, name string) {
+	comps := splitPath(absPath)
+	if len(comps) == 0 {
+		return "", ""
+	}
+	name = comps[len(comps)-1]
+	parentComps := comps[:len(comps)-1]
+	if len(parentComps) == 0 {
+		return "/", name
+	}
+	return "/" + strings.Join(parentComps, "/"), name
 }
 
 // hasMetaAnywhere はパス要素のいずれかが glob メタ文字を含むかを返す。

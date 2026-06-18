@@ -38,7 +38,11 @@
 | | |
 |---|---|
 | 📋 **`ls`** | List files and folders in My Drive (detailed view with `-l`) |
-| ⬇️ **`cp`** | Download files from Drive to your local machine (recursive folders with `-r`) |
+| 🔁 **`cp`** | Copy **both ways** — download (`drive:` → local) and upload (local → `drive:`), recursive with `-r` |
+| 🔄 **`sync`** | One-way directory sync in either direction, with `--delete` and `--dry-run` |
+| 📁 **`mkdir`** | Create folders on Drive (`-p` for parents) |
+| 🗑️ **`rm`** | Delete files/folders (trash by default, `--permanent` to skip the trash) |
+| ✂️ **`mv`** | Move/rename within Drive (metadata-only, no re-upload) |
 | ✳️ **Wildcards** | Use `*`, `?`, `[...]` at every level of a path |
 | ⌨️ **Tab Completion** | Subcommands, flags, **and dynamic completion of Drive paths** |
 | 🔐 **No service-account keys** | Authenticate with **your own** OAuth client and Google account |
@@ -153,6 +157,19 @@ gdr auth logout   # 🚪 Remove the saved token
 
 ## 📂 Usage
 
+### 🧭 Path notation: `drive:`
+
+Paths on Google Drive are written with a **`drive:`** prefix (e.g. `drive:/Documents/a.pdf`);
+paths without it are local. This lets transfer commands tell the two sides apart.
+
+- `ls` treats its argument as a Drive path by default, so `gdr ls /Documents` still works
+  (and `gdr ls drive:/Documents` is equivalent).
+- `cp`, `sync`, `mkdir`, `rm`, and `mv` use the prefix to decide what is Drive and what is local.
+
+> 🔀 **Breaking change in this version:** `cp` now requires `drive:` on the Drive side to make
+> the transfer direction unambiguous. Use `gdr cp drive:/Documents/x.pdf .` instead of the
+> old `gdr cp /Documents/x.pdf .`.
+
 ### 📋 `ls` — List
 
 ```sh
@@ -167,23 +184,73 @@ gdr ls '/Documents/*.pdf'    # ✳️ Wildcards
 The detailed view columns are `kind / size / modified / name`. **kind** is one of
 `dir` (folder), `file` (regular file), or `gdoc` (Google-native format).
 
-### ⬇️ `cp` — Download
+### 🔁 `cp` — Download & Upload
+
+Direction is decided by which side carries the `drive:` prefix.
 
 ```sh
-gdr cp /Documents/report.pdf .          # 📥 Into the current directory
-gdr cp /Documents/report.pdf ./out.pdf  # 🏷️  Save under a chosen name
-gdr cp '/Documents/*.pdf' ./pdfs/       # 🗂️  Multiple files into a directory
-gdr cp -r /Documents/project ./backup/  # 🔁 Download a folder recursively
+# Download (drive: → local)
+gdr cp drive:/Documents/report.pdf .          # 📥 Into the current directory
+gdr cp drive:/Documents/report.pdf ./out.pdf  # 🏷️  Save under a chosen name
+gdr cp 'drive:/Documents/*.pdf' ./pdfs/        # 🗂️  Multiple files into a directory
+gdr cp -r drive:/Documents/project ./backup/   # 📁 Download a folder recursively
+
+# Upload (local → drive:)
+gdr cp ./report.pdf drive:/Documents/          # 📤 Upload a file
+gdr cp './*.pdf' drive:/Documents/             # 🗂️  Upload multiple files
+gdr cp -r ./project drive:/backup/             # 📁 Upload a folder recursively
 ```
 
-- If the **source** matches multiple items (e.g. via a glob), the **destination** must be
-  an existing directory.
-- On name collisions within the same directory, a counter is appended like `name (1).ext`.
+- If the **source** matches multiple items (e.g. via a glob), the **destination** must be a
+  directory (an existing local dir for downloads; a Drive folder for uploads).
+- On local name collisions during download, a counter is appended like `name (1).ext`.
 - 🚧 Google-native formats (Google Docs/Sheets/etc.) can't be downloaded normally and are
   **skipped with a warning** for now.
 
-> ⚠️ Quote paths containing wildcards (e.g. `'/Documents/*.pdf'`) so your shell doesn't
+> ⚠️ Quote paths containing wildcards (e.g. `'drive:/Documents/*.pdf'`) so your shell doesn't
 > expand them against **local** filenames.
+
+### 🔄 `sync` — One-way directory sync
+
+```sh
+gdr sync ./site drive:/backup/site        # ⬆️  Local → Drive
+gdr sync drive:/Photos ./photos           # ⬇️  Drive → Local
+gdr sync --delete ./site drive:/backup    # 🧹 Remove extras at the destination
+gdr sync --dry-run ./site drive:/backup   # 👀 Preview without transferring
+```
+
+Files are compared by **size and modification time**: same size and a destination that is
+as new or newer is skipped; otherwise the file is transferred. `--delete` removes files that
+exist only at the destination (moved to trash on the Drive side). Google-native formats are
+skipped.
+
+### 📁 `mkdir` — Create folders
+
+```sh
+gdr mkdir drive:/Documents/newdir   # 📁 Requires the parent to exist
+gdr mkdir -p drive:/a/b/c           # 🌳 Create parents as needed (idempotent)
+```
+
+### 🗑️ `rm` — Delete
+
+```sh
+gdr rm drive:/Documents/old.pdf       # 🗑️  Move to trash (recoverable)
+gdr rm 'drive:/tmp/*.log'             # ✳️ Wildcards
+gdr rm -r drive:/Documents/oldproject # 📁 Delete a folder
+gdr rm --permanent drive:/secret.txt  # ⚠️ Permanent (skips the trash, unrecoverable)
+```
+
+Deletion moves items to the Drive trash by default. Folders need `-r`.
+
+### ✂️ `mv` — Move & rename (within Drive)
+
+```sh
+gdr mv drive:/a.txt drive:/Documents/    # 📁 Move into a folder
+gdr mv drive:/old.txt drive:/new.txt     # 🏷️  Rename
+```
+
+Moves are metadata-only on Drive, so no re-upload happens. To move between Drive and local,
+`cp` then `rm`.
 
 ---
 
@@ -238,12 +305,14 @@ gdr completion fish > ~/.config/fish/completions/gdr.fish
 ## ⚠️ Design Notes & Known Limitations
 
 - 🏠 Scoped to **My Drive only** — Shared Drives are not supported.
-- ⬇️ `cp` supports **download only** (Drive → local). The OAuth scope is already the
-  read-write `drive` scope (with future uploads in mind), so upload support can be added
-  without re-authentication.
-- 📄 Exporting Google-native formats (Docs → PDF, etc.) is **not yet supported**.
-- 👯 Drive allows **duplicate names**. When several items share a name, `ls` lists them
-  all, and `cp` downloads them all, appending a counter on collision.
+- 🔁 `cp` transfers between Drive and local in **both directions**, but not Drive-to-Drive
+  (use `mv`) or local-to-local (use your OS `cp`).
+- 📄 Exporting Google-native formats (Docs → PDF, etc.) is **not yet supported**; they are
+  skipped by `cp` and `sync`.
+- 🔄 `sync` is **one-way** (the direction set by the arguments) and compares by size and
+  modification time, not by content hash.
+- 👯 Drive allows **duplicate names**. When several items share a name, `ls` lists them all,
+  and `cp` downloads them all, appending a counter on collision.
 
 ---
 
