@@ -2,10 +2,15 @@ package drive
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"path"
 	"strings"
 )
+
+// ErrNotFound は Resolve でリテラルパスが存在しなかったことを表す。
+// errors.Is で判定し、API 障害などの本当のエラーと区別するために使う。
+var ErrNotFound = errors.New("パスが見つかりません")
 
 // Node はパス解決の結果一つ分。Drive 上のファイルと、その絶対パスを持つ。
 // 同名ファイルや glob により一つのパス式が複数の Node に解決されうる。
@@ -73,7 +78,9 @@ func (c *Client) Resolve(ctx context.Context, p string) ([]Node, error) {
 			if hasMetaAnywhere(components) {
 				return nil, nil
 			}
-			return nil, fmt.Errorf("パスが見つかりません: %s", p)
+			// ErrNotFound でラップし、呼び出し側が「単に存在しない」ことを
+			// API 障害などの本当のエラーと区別できるようにする。
+			return nil, fmt.Errorf("%w: %s", ErrNotFound, p)
 		}
 		current = next
 	}

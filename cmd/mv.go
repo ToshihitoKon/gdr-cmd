@@ -2,6 +2,7 @@ package cmd
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"os"
 	"strings"
@@ -72,7 +73,10 @@ func runMv(cmd *cobra.Command, args []string) error {
 	}
 
 	// DEST が既存フォルダかを調べる。
-	destFolderID, destIsFolder := resolveExistingFolder(ctx, client, destPath)
+	destFolderID, destIsFolder, err := resolveExistingFolder(ctx, client, destPath)
+	if err != nil {
+		return err
+	}
 
 	if len(sources) > 1 && !destIsFolder {
 		return fmt.Errorf("コピー元が複数あります。コピー先 %q は既存のフォルダである必要があります", destPath)
@@ -85,19 +89,23 @@ func runMv(cmd *cobra.Command, args []string) error {
 	return renameTo(ctx, client, sources[0], destPath)
 }
 
-// resolveExistingFolder は absPath が既存フォルダなら (ID, true) を返す。
-// 解決できない/フォルダでない場合は ("", false)。
-func resolveExistingFolder(ctx context.Context, client *drive.Client, absPath string) (string, bool) {
+// resolveExistingFolder は absPath が既存フォルダなら (ID, true, nil) を返す。
+// 存在しない/フォルダでない場合は ("", false, nil)。API 障害などの本当の
+// エラーは ("", false, err) で伝播し、単なる not-found と混同しない。
+func resolveExistingFolder(ctx context.Context, client *drive.Client, absPath string) (string, bool, error) {
 	nodes, err := client.Resolve(ctx, absPath)
 	if err != nil {
-		return "", false
+		if errors.Is(err, drive.ErrNotFound) {
+			return "", false, nil
+		}
+		return "", false, err
 	}
 	for _, n := range nodes {
 		if n.File.IsFolder() {
-			return n.File.ID, true
+			return n.File.ID, true, nil
 		}
 	}
-	return "", false
+	return "", false, nil
 }
 
 // moveIntoFolder は sources を destFolderID 直下へ移動する (名前は維持)。
@@ -134,7 +142,10 @@ func renameTo(ctx context.Context, client *drive.Client, src drive.Node, destPat
 		return fmt.Errorf("コピー先が不正です: %s", destPath)
 	}
 
-	destParentID, ok := resolveExistingFolder(ctx, client, destParentPath)
+	destParentID, ok, err := resolveExistingFolder(ctx, client, destParentPath)
+	if err != nil {
+		return err
+	}
 	if !ok {
 		return fmt.Errorf("コピー先の親フォルダが見つかりません: %s", destParentPath)
 	}

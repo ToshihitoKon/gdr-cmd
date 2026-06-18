@@ -227,7 +227,11 @@ func uploadSources(ctx context.Context, sources []loc.Location, dest loc.Locatio
 	// 宛先をファイル名指定として扱うか、フォルダとして扱うかを決める。
 	// 単一ファイルを、末尾スラッシュ無し・既存フォルダでない drive: パスへ送る場合だけ
 	// 「リネーム付きアップロード」とみなし、それ以外は dest をフォルダとして扱う。
-	if isSingleFileRename(ctx, client, localPaths, rawDest, dest.Path) {
+	rename, err := isSingleFileRename(ctx, client, localPaths, rawDest, dest.Path)
+	if err != nil {
+		return err
+	}
+	if rename {
 		parentPath, name := drive.SplitParent(dest.Path)
 		parentID, err := client.EnsureFolderPath(ctx, parentPath)
 		if err != nil {
@@ -261,19 +265,20 @@ func uploadSources(ctx context.Context, sources []loc.Location, dest loc.Locatio
 // isSingleFileRename は宛先をファイル名指定 (リネーム付きアップロード) として
 // 扱うべきかを返す。単一のローカルファイルを、末尾スラッシュ無し・かつ Drive 上に
 // 既存フォルダでないパスへ送る場合だけ true。複数元・ディレクトリ・末尾スラッシュ・
-// 既存フォルダ宛はすべてフォルダ扱い (false)。
-func isSingleFileRename(ctx context.Context, client *drive.Client, localPaths []string, rawDest, destPath string) bool {
+// 既存フォルダ宛はすべてフォルダ扱い (false)。フォルダ判定での API 障害は err で返す。
+func isSingleFileRename(ctx context.Context, client *drive.Client, localPaths []string, rawDest, destPath string) (bool, error) {
 	if len(localPaths) != 1 || loc.HasTrailingSlash(rawDest) {
-		return false
+		return false, nil
 	}
 	if info, err := os.Stat(localPaths[0]); err != nil || info.IsDir() {
-		return false
+		return false, nil
 	}
 	// 宛先が既に Drive 上のフォルダなら、その中へ入れる (ファイル名指定ではない)。
-	if _, isFolder := resolveExistingFolder(ctx, client, destPath); isFolder {
-		return false
+	_, isFolder, err := resolveExistingFolder(ctx, client, destPath)
+	if err != nil {
+		return false, err
 	}
-	return true
+	return !isFolder, nil
 }
 
 // uploadPath はローカルのファイル/ディレクトリを Drive の parentID 直下へ上げる。

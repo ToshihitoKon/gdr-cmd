@@ -289,7 +289,10 @@ func syncDriveToLocal(ctx context.Context, driveRoot, localRoot string) error {
 	}
 
 	// SOURCE の Drive フォルダを解決する。
-	srcID, ok := resolveExistingFolder(ctx, client, driveRoot)
+	srcID, ok, err := resolveExistingFolder(ctx, client, driveRoot)
+	if err != nil {
+		return err
+	}
 	if !ok {
 		return fmt.Errorf("コピー元の Drive フォルダが見つかりません: %s", driveRoot)
 	}
