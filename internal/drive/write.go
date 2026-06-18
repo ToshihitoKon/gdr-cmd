@@ -152,6 +152,24 @@ func (c *Client) Move(ctx context.Context, fileID, newParentID, oldParentID stri
 	return nil
 }
 
+// MoveRename は親の付け替えと名前変更を 1 回の更新で行う (原子的)。
+// oldParentID/newParentID が同じ (または空) なら付け替えはしない。newName が
+// 空なら名前は変えない。リネーム付き移動で中間状態が残らないようにするために使う。
+func (c *Client) MoveRename(ctx context.Context, fileID, newParentID, oldParentID, newName string) error {
+	meta := &drive.File{}
+	if newName != "" {
+		meta.Name = newName
+	}
+	call := c.svc.Files.Update(fileID, meta)
+	if newParentID != "" && newParentID != oldParentID {
+		call = call.AddParents(newParentID).RemoveParents(oldParentID)
+	}
+	if _, err := call.Fields("id, name, parents").Context(ctx).Do(); err != nil {
+		return fmt.Errorf("移動・リネームに失敗しました: %w", err)
+	}
+	return nil
+}
+
 // Rename は fileID の名前を newName に変更する。
 func (c *Client) Rename(ctx context.Context, fileID, newName string) error {
 	_, err := c.svc.Files.Update(fileID, &drive.File{Name: newName}).

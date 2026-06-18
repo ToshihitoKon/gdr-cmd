@@ -136,17 +136,22 @@ func renameTo(ctx context.Context, client *drive.Client, src drive.Node, destPat
 		return fmt.Errorf("コピー先の親フォルダが見つかりません: %s", destParentPath)
 	}
 
-	// 親が変わるなら先に移動する。
+	// 親の付け替えと名前変更を 1 回の更新で原子的に行う (中間状態を残さない)。
+	newParentID := ""
 	if destParentID != src.ParentID {
-		if err := client.Move(ctx, src.File.ID, destParentID, src.ParentID); err != nil {
-			return err
-		}
+		newParentID = destParentID
 	}
-	// 名前が変わるならリネームする。
+	newName := ""
 	if destName != src.File.Name {
-		if err := client.Rename(ctx, src.File.ID, destName); err != nil {
-			return err
-		}
+		newName = destName
+	}
+	if newParentID == "" && newName == "" {
+		// 同じ場所・同じ名前。何もしない。
+		fmt.Fprintf(os.Stderr, "移動: 変更なし: drive:%s\n", src.Path)
+		return nil
+	}
+	if err := client.MoveRename(ctx, src.File.ID, newParentID, src.ParentID, newName); err != nil {
+		return err
 	}
 	fmt.Fprintf(os.Stderr, "移動: drive:%s -> drive:%s\n", src.Path, destPath)
 	return nil
