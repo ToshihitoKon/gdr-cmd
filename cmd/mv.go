@@ -4,6 +4,7 @@ import (
 	"context"
 	"fmt"
 	"os"
+	"strings"
 
 	"github.com/ToshihitoKon/gdr-cmd/internal/drive"
 	"github.com/ToshihitoKon/gdr-cmd/internal/loc"
@@ -103,8 +104,10 @@ func resolveExistingFolder(ctx context.Context, client *drive.Client, absPath st
 func moveIntoFolder(ctx context.Context, client *drive.Client, sources []drive.Node, destFolderID, destPath string) error {
 	var firstErr error
 	for _, src := range sources {
-		if src.File.ID == destFolderID {
-			err := fmt.Errorf("自分自身へは移動できません: %s", src.Path)
+		// 自分自身、または自分の子孫フォルダへの移動はループになるので弾く
+		// (Drive API も拒否するが、事前に分かりやすいエラーを出す)。
+		if src.File.ID == destFolderID || isSelfOrDescendant(src.Path, destPath) {
+			err := fmt.Errorf("自分自身または配下へは移動できません: %s -> %s", src.Path, destPath)
 			fmt.Fprintln(os.Stderr, "mv:", err)
 			if firstErr == nil {
 				firstErr = err
@@ -136,6 +139,11 @@ func renameTo(ctx context.Context, client *drive.Client, src drive.Node, destPat
 		return fmt.Errorf("コピー先の親フォルダが見つかりません: %s", destParentPath)
 	}
 
+	// フォルダを自分自身や配下へ移動するとループになるので弾く。
+	if isSelfOrDescendant(src.Path, destPath) {
+		return fmt.Errorf("自分自身または配下へは移動できません: %s -> %s", src.Path, destPath)
+	}
+
 	// 親の付け替えと名前変更を 1 回の更新で原子的に行う (中間状態を残さない)。
 	newParentID := ""
 	if destParentID != src.ParentID {
@@ -155,4 +163,10 @@ func renameTo(ctx context.Context, client *drive.Client, src drive.Node, destPat
 	}
 	fmt.Fprintf(os.Stderr, "移動: drive:%s -> drive:%s\n", src.Path, destPath)
 	return nil
+}
+
+// isSelfOrDescendant は target が src と同じか、src フォルダの配下かを返す。
+// フォルダを自分自身/子孫へ移動するループを防ぐために使う。
+func isSelfOrDescendant(srcPath, target string) bool {
+	return target == srcPath || strings.HasPrefix(target, srcPath+"/")
 }
