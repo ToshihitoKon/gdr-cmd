@@ -14,9 +14,15 @@ import (
 	"time"
 
 	"github.com/ToshihitoKon/gdr-cmd/internal/drive"
+	"github.com/ToshihitoKon/gdr-cmd/internal/ignore"
 	"github.com/ToshihitoKon/gdr-cmd/internal/loc"
 	"github.com/spf13/cobra"
 )
+
+// gdrignoreFile is the name of the ignore file read from the local sync root.
+// Its patterns exclude matching paths from sync in either direction; the file
+// itself is always excluded.
+const gdrignoreFile = ".gdrignore"
 
 var (
 	syncDelete   bool
@@ -40,6 +46,10 @@ are removed (trashed on the Drive side). With --dry-run, no transfer happens and
 only the planned operations are shown.
 
 Google-native formats (Google Docs etc.) are not synced.
+
+If a .gdrignore file exists in the local sync root, its .gitignore-style
+patterns exclude matching paths from sync in both directions. The .gdrignore
+file itself is never synced.
 
 Examples:
   gdr sync ./site drive:/backup/site
@@ -124,7 +134,14 @@ func syncLocalToDrive(ctx context.Context, localRoot, driveRoot string) error {
 		return fmt.Errorf("sync source must be a directory: %s", localRoot)
 	}
 
-	srcTree, err := buildLocalTree(localRoot)
+	// .gdrignore lives in the local root and applies to both trees, keyed by the
+	// shared relative path.
+	matcher, err := ignore.Load(filepath.Join(localRoot, gdrignoreFile))
+	if err != nil {
+		return fmt.Errorf("failed to read %s: %w", gdrignoreFile, err)
+	}
+
+	srcTree, err := buildLocalTree(localRoot, matcher)
 	if err != nil {
 		return err
 	}
@@ -138,6 +155,9 @@ func syncLocalToDrive(ctx context.Context, localRoot, driveRoot string) error {
 	if err != nil {
 		return err
 	}
+	// Ignored Drive-side entries must also drop out of dstTree; otherwise
+	// --delete would treat them as "extra in DEST" and remove them.
+	filterIgnored(dstTree, matcher)
 
 	// Process relative paths shallowest-first so folders are created before
 	// their files are uploaded. Subtrees whose type conflicts (folder on one
@@ -301,17 +321,26 @@ func syncDriveToLocal(ctx context.Context, driveRoot, localRoot string) error {
 		return fmt.Errorf("source Drive folder not found: %s", driveRoot)
 	}
 
+	// .gdrignore is read from the local DEST root and applied to both sides,
+	// keyed by the shared relative path. Read it before creating the directory
+	// so a pre-existing ignore file is honored.
+	matcher, err := ignore.Load(filepath.Join(localRoot, gdrignoreFile))
+	if err != nil {
+		return fmt.Errorf("failed to read %s: %w", gdrignoreFile, err)
+	}
+
 	srcTree, err := buildDriveTree(ctx, client, srcID)
 	if err != nil {
 		return err
 	}
+	filterIgnored(srcTree, matcher)
 
 	if !syncDryRun {
 		if err := os.MkdirAll(localRoot, 0o755); err != nil {
 			return fmt.Errorf("failed to create destination (%s): %w", localRoot, err)
 		}
 	}
-	dstTree, err := buildLocalTree(localRoot)
+	dstTree, err := buildLocalTree(localRoot, matcher)
 	if err != nil {
 		return err
 	}
@@ -448,8 +477,10 @@ func deleteExtraOnLocal(srcTree, dstTree map[string]entry, localRoot string) err
 // ---- tree construction ----
 
 // buildLocalTree recurses under localRoot and builds a map of relative path ->
-// entry. The root itself is not included.
-func buildLocalTree(localRoot string) (map[string]entry, error) {
+// entry. The root itself is not included. Paths matched by matcher (and the
+// .gdrignore file itself) are excluded; an ignored directory is pruned with its
+// whole subtree.
+func buildLocalTree(localRoot string, matcher *ignore.Matcher) (map[string]entry, error) {
 	tree := make(map[string]entry)
 	err := filepath.WalkDir(localRoot, func(p string, d os.DirEntry, err error) error {
 		if err != nil {
@@ -463,6 +494,14 @@ func buildLocalTree(localRoot string) (map[string]entry, error) {
 			return err
 		}
 		rel = filepath.ToSlash(rel)
+
+		if isIgnored(rel, d.IsDir(), matcher) {
+			if d.IsDir() {
+				return filepath.SkipDir
+			}
+			return nil
+		}
+
 		info, err := d.Info()
 		if err != nil {
 			return err
@@ -478,6 +517,25 @@ func buildLocalTree(localRoot string) (map[string]entry, error) {
 		return nil, fmt.Errorf("failed to walk the local directory: %w", err)
 	}
 	return tree, nil
+}
+
+// filterIgnored removes ignored entries from an already-built tree (used for the
+// Drive side, where the tree can't be pruned during a directory walk).
+func filterIgnored(tree map[string]entry, matcher *ignore.Matcher) {
+	for rel, e := range tree {
+		if isIgnored(rel, e.isDir, matcher) {
+			delete(tree, rel)
+		}
+	}
+}
+
+// isIgnored reports whether the relative path is excluded from sync, either by
+// being the .gdrignore file itself (always excluded) or by matching a pattern.
+func isIgnored(rel string, isDir bool, matcher *ignore.Matcher) bool {
+	if rel == gdrignoreFile {
+		return true
+	}
+	return matcher.Match(rel, isDir)
 }
 
 // buildDriveTree recurses under a Drive folder and builds a map of relative path -> entry.

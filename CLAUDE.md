@@ -18,6 +18,7 @@ cmd/drive → loc の順。
 | `internal/auth/` | OAuth フロー、トークン永続化・自動更新、認証済み HTTP クライアント生成 |
 | `internal/drive/` | Drive API ラッパー。読み取り (client.go: list/download/解決/glob) と書き込み (write.go: upload/mkdir/trash/delete/move/rename) |
 | `internal/loc/` | 引数の `drive:` 記法を Drive/ローカルに分類する |
+| `internal/ignore/` | `.gdrignore` (.gitignore 風) のパース・マッチ。`sync` 専用 |
 
 ### パス記法 (internal/loc)
 
@@ -63,6 +64,10 @@ API 非依存の純粋ロジック (パス分解・glob 判定・認可コード
 - **`sync` の差分判定は size + mtime**。mtime は Drive (ミリ秒) とローカル (ナノ秒) で
   精度が違うため秒単位に丸めて比較する (`needsTransfer`)。内容ハッシュ比較はしない。
 - **`rm` と `sync --delete` は既定でゴミ箱送り** (`trashed=true`)。`--permanent` で完全削除。
+- **`.gdrignore` は `sync` 専用でローカルルート直下の 1 ファイルのみ**を読む。両端ツリーを
+  共有の相対パスでフィルタするため、download/upload どちらでも基準はローカル側ルート。
+  除外対象は転送も `--delete` もされない (ツリーから消すことで「存在しない」扱いにする)。
+  `.gdrignore` 自身は常に除外。`cp` や `ls` には適用しない。
 - **`-h` は cobra が `--help` のショートハンドに使う**。サブコマンドで `-h` を別フラグに
   割り当てると起動時に panic するため避ける (ls の `--human-readable` はロングのみ)
 - **Drive クエリの文字列リテラルはエスケープ必須** (`escapeQueryValue`)。ファイル名に

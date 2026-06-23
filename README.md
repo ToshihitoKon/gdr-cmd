@@ -39,7 +39,7 @@
 |---|---|
 | 📋 **`ls`** | List files and folders in My Drive (detailed view with `-l`) |
 | 🔁 **`cp`** | Copy **both ways** — download (`drive:` → local) and upload (local → `drive:`), recursive with `-r` |
-| 🔄 **`sync`** | One-way directory sync in either direction, with `--delete` and `--dry-run` |
+| 🔄 **`sync`** | One-way directory sync in either direction, with `--delete`, `--dry-run`, and `.gdrignore` |
 | 📁 **`mkdir`** | Create folders on Drive (`-p` for parents) |
 | 🗑️ **`rm`** | Delete files/folders (trash by default, `--permanent` to skip the trash) |
 | ✂️ **`mv`** | Move/rename within Drive (metadata-only, no re-upload) |
@@ -229,6 +229,27 @@ skipped (and never deleted by `--delete`).
   that don't change the size are still transferred (slower, but exact).
 - ⚠️ If an entry exists on both sides but one is a file and the other a folder, that path
   (and its subtree) is **skipped** rather than overwritten.
+- 🙈 A `.gdrignore` file in the **local sync root** excludes matching paths from sync in
+  both directions (see below).
+
+#### 🙈 `.gdrignore`
+
+Place a `.gdrignore` file in the **local root** of a sync (the local directory, regardless of
+transfer direction). It uses a `.gitignore`-style syntax and excludes matching paths from
+sync — they are neither transferred nor removed by `--delete`. The `.gdrignore` file itself
+is never synced.
+
+```gitignore
+# Comments and blank lines are ignored
+*.log               # match a name at any depth
+build/out           # anchored to the root (a "/" anchors the pattern)
+/tmp                # only the root-level tmp
+node_modules/       # a trailing "/" matches directories only; the subtree is excluded
+!keep.log           # "!" re-includes a path an earlier pattern excluded
+```
+
+The **last matching pattern wins**, so a later `!` re-includes and a still-later plain pattern
+re-excludes.
 
 ### 📁 `mkdir` — Create folders
 

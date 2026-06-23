@@ -1,9 +1,14 @@
 package cmd
 
 import (
+	"os"
+	"path/filepath"
 	"reflect"
+	"sort"
 	"testing"
 	"time"
+
+	"github.com/ToshihitoKon/gdr-cmd/internal/ignore"
 )
 
 func Test_needsTransfer_DecidesBySizeAndModTime(t *testing.T) {
@@ -67,5 +72,48 @@ func Test_sortedKeys_OrdersShallowestThenLexically(t *testing.T) {
 	want := []string{"a", "b", "a/z", "b/a", "b/c/d"}
 	if !reflect.DeepEqual(got, want) {
 		t.Errorf("sortedKeys() = %v, want %v", got, want)
+	}
+}
+
+func Test_buildLocalTree_ExcludesIgnoredPaths(t *testing.T) {
+	root := t.TempDir()
+	files := []string{
+		"keep.txt",
+		"debug.log",
+		"node_modules/pkg/index.js",
+		"src/main.go",
+	}
+	for _, rel := range files {
+		p := filepath.Join(root, filepath.FromSlash(rel))
+		if err := os.MkdirAll(filepath.Dir(p), 0o755); err != nil {
+			t.Fatal(err)
+		}
+		if err := os.WriteFile(p, []byte("x"), 0o644); err != nil {
+			t.Fatal(err)
+		}
+	}
+
+	if err := os.WriteFile(filepath.Join(root, ".gdrignore"), []byte("*.log\nnode_modules/\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	matcher, err := ignore.Load(filepath.Join(root, ".gdrignore"))
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	tree, err := buildLocalTree(root, matcher)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	var got []string
+	for rel := range tree {
+		got = append(got, rel)
+	}
+	sort.Strings(got)
+	// .gdrignore itself, *.log, and the whole node_modules subtree are excluded.
+	want := []string{"keep.txt", "src", "src/main.go"}
+	if !reflect.DeepEqual(got, want) {
+		t.Errorf("buildLocalTree kept %v, want %v", got, want)
 	}
 }
